@@ -95,12 +95,20 @@ def _read_pdf_paragraphs(document_bytes: bytes) -> list[str]:
         pdf_path = handle.name
 
     try:
-        extracted = _extract_pdf_text_via_mdls(pdf_path) or _extract_pdf_text_via_strings(pdf_path)
+        extracted = _extract_pdf_text_via_mdls(pdf_path)
+        if not extracted:
+            extracted = _extract_pdf_text_via_strings(pdf_path)
     finally:
         try:
             os.unlink(pdf_path)
         except OSError:
             pass
+
+    if _looks_like_pdf_container_dump(extracted):
+        raise ValueError(
+            "Das PDF-Prüfungsdossier liefert nur technische PDF-Rohdaten statt lesbarem Text. "
+            "Bitte das Dossier als TXT oder DOCX hochladen."
+        )
 
     paragraphs = [line.strip() for line in re.split(r"\n\s*\n|\r\n\s*\r\n", extracted or "") if line.strip()]
     if not paragraphs:
@@ -144,10 +152,40 @@ def _extract_pdf_text_via_strings(pdf_path: str) -> str:
         cleaned = re.sub(r"\s+", " ", line).strip()
         if len(cleaned) < 20:
             continue
+        if _is_probable_pdf_metadata_line(cleaned):
+            continue
         if sum(character.isalpha() for character in cleaned) < 12:
             continue
         lines.append(cleaned)
     return "\n".join(lines)
+
+
+def _is_probable_pdf_metadata_line(text: str) -> bool:
+    lowered = text.lower()
+    markers = [
+        "%pdf", " obj", "endobj", "stream", "endstream", "/type", "/font", "/page", "/pages",
+        "/mediabox", "/cropbox", "/length", "/filter", "/flatedecode", "/contents", "/resources",
+        "/fontdescriptor", "/tounicode", "/subtype", "/basefont", "/procset", "/xobject",
+        "/catalog", "/parent", "/root", "/info", "/metadata", "/widths",
+    ]
+    return any(marker in lowered for marker in markers) or text.count("/") >= 4 or text.count("<<") >= 1
+
+
+def _looks_like_pdf_container_dump(text: str) -> bool:
+    if not text:
+        return True
+
+    sample = text[:5000].lower()
+    marker_hits = sum(
+        sample.count(marker)
+        for marker in [
+            "/type", "/font", "/page", "/pages", "/mediabox", "/cropbox", "/length",
+            "/filter", "/flatedecode", "/contents", "/resources", "endobj", "stream", "endstream",
+        ]
+    )
+    slash_count = sample.count("/")
+    natural_words = len(re.findall(r"\b[a-zäöüß]{4,}\b", sample))
+    return marker_hits >= 4 or (slash_count > natural_words and marker_hits >= 2)
 
 
 def calculate_overall_grade(review: dict) -> float:
