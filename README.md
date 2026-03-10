@@ -1,6 +1,37 @@
 # Korrekturroboter
 
-Lokaler Korrekturroboter für deutschsprachige Maturaufsatztexte. Ein hochgeladenes `.docx` wird über LM Studio analysiert und als neues Word-Dokument mit roten Fehlermarkierungen, textbezogenen Kommentaren und ausführlichem Gesamtfeedback zurückgegeben.
+Dieses Repo ist die **Codebasis** der Plattform, nicht die laufende Plattform selbst.
+
+## Wichtig
+
+GitHub kann **keinen lokalen Startbutton ausführen**.  
+Die GitHub-Seite zeigt nur Dateien und das `README.md`.
+
+Die Anwendung startest du **lokal auf deinem Mac** per Doppelklick auf:
+
+- `START_HIER.command`
+
+Falls du im Finder arbeitest, öffne einfach den Ordner `korrekturroboter` und doppelklicke auf `START_HIER.command`.
+
+## Direkt starten
+
+```bash
+cd "/Users/patrickfischer/Documents/New project/korrekturroboter"
+./START_HIER.command
+```
+
+Danach öffnet sich die Plattform unter:
+
+[http://127.0.0.1:8090](http://127.0.0.1:8090)
+
+Alternativ manuell:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 server.py
+```
+
+Die Anwendung nimmt ein `.docx` entgegen, analysiert es lokal über LM Studio und erzeugt ein neues Word-Dokument mit roten Fehlermarkierungen, textbezogenen Kommentaren und ausführlichem Gesamtfeedback.
 
 ## Was das Repo leistet
 
@@ -34,18 +65,6 @@ Zusätzlich startet der Server nur noch, wenn lokales LM Studio erreichbar ist u
 - Python 3.10 oder neuer
 - Ein in LM Studio geladenes Sprachmodell
 - Aktivierter lokaler Server in LM Studio, standardmäßig `http://127.0.0.1:1234/v1`
-
-## Start
-
-```bash
-cd "/Users/patrickfischer/Documents/New project/korrekturroboter"
-python3 -m pip install -r requirements.txt
-python3 server.py
-```
-
-Danach im Browser:
-
-[http://127.0.0.1:8090](http://127.0.0.1:8090)
 
 ## Konfiguration
 
