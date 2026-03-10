@@ -163,6 +163,19 @@ FORM_GUIDELINES = {
 }
 
 
+GERMAN_STOPWORDS = {
+    "aber", "alle", "alles", "auch", "auf", "aus", "bei", "beim", "bin", "bis", "bist", "damit",
+    "dann", "das", "dass", "dein", "deine", "dem", "den", "der", "des", "dessen", "deshalb", "die",
+    "dies", "diese", "dieser", "doch", "dort", "du", "durch", "ein", "eine", "einem", "einen",
+    "einer", "eines", "er", "es", "euch", "euer", "eure", "für", "hat", "hatte", "hier", "hinter",
+    "ich", "ihm", "ihn", "ihr", "ihre", "im", "in", "ist", "ja", "jede", "jeder", "jedes", "kein",
+    "keine", "können", "man", "mit", "muss", "nach", "nicht", "noch", "nun", "oder", "ohne", "sehr",
+    "sein", "seine", "sich", "sie", "sind", "soll", "sollen", "sollte", "sollten", "sondern", "so",
+    "um", "und", "uns", "unter", "vom", "von", "vor", "war", "waren", "was", "weil", "wenn", "wer",
+    "wie", "wir", "wird", "wurde", "zu", "zum", "zur", "zwar",
+}
+
+
 DISCUSSION_STRUCTURE_NOTES = {
     "linear_discussion": [
         "Ordne die Argumente steigernd von wichtig über wichtiger bis zum zentralen Schlussargument.",
@@ -252,6 +265,119 @@ def detect_document_type(text: str, requested_type: str, assignment_text: str = 
     return "essay"
 
 
+def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: list[str]) -> dict[str, Any]:
+    essay_text = "\n".join(essay_paragraphs).strip()
+    dossier_text = "\n".join(dossier_paragraphs).strip()
+    if not essay_text or not dossier_text:
+        return {"topic": "", "assignment_text": "", "document_type": "auto", "match_label": "", "candidates": []}
+
+    candidates = _build_dossier_candidates(dossier_paragraphs)
+    if not candidates:
+        return {"topic": "", "assignment_text": "", "document_type": "auto", "match_label": "", "candidates": []}
+
+    scored = []
+    for candidate in candidates:
+        score = _score_candidate_against_essay(candidate["assignment_text"], essay_text)
+        scored.append((score, candidate))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, best = scored[0]
+    if best_score <= 0:
+        return {"topic": "", "assignment_text": "", "document_type": "auto", "match_label": "", "candidates": []}
+
+    normalized_candidates = []
+    for score, candidate in scored[:6]:
+        if score <= 0:
+            continue
+        assignment_text = normalize_sentence(candidate["assignment_text"])
+        topic = _derive_topic_from_candidate(candidate["topic"], assignment_text)
+        document_type = detect_document_type(essay_text, "auto", assignment_text, topic)
+        normalized_candidates.append(
+            {
+                "topic": topic,
+                "assignment_text": assignment_text,
+                "document_type": document_type,
+                "document_type_label": FORM_LABELS.get(document_type, document_type),
+                "match_score": score,
+                "match_label": f"Trefferwert {score}",
+            }
+        )
+
+    assignment_text = normalize_sentence(best["assignment_text"])
+    topic = _derive_topic_from_candidate(best["topic"], assignment_text)
+    document_type = detect_document_type(essay_text, "auto", assignment_text, topic)
+    return {
+        "topic": topic,
+        "assignment_text": assignment_text,
+        "document_type": document_type,
+        "match_label": f"Thema aus Prüfungsdossier erkannt (Trefferwert {best_score}).",
+        "candidates": normalized_candidates,
+    }
+
+
+def _build_dossier_candidates(paragraphs: list[str]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for index, paragraph in enumerate(paragraphs):
+        cleaned = re.sub(r"\s+", " ", paragraph).strip()
+        if not cleaned:
+            continue
+
+        block = [cleaned]
+        if index + 1 < len(paragraphs):
+            next_paragraph = re.sub(r"\s+", " ", paragraphs[index + 1]).strip()
+            if next_paragraph and len(next_paragraph) < 420:
+                block.append(next_paragraph)
+
+        combined = " ".join(block).strip()
+        if _looks_like_assignment(combined):
+            candidates.append(
+                {
+                    "topic": cleaned,
+                    "assignment_text": combined,
+                }
+            )
+
+    if candidates:
+        return candidates
+
+    windows: list[dict[str, str]] = []
+    for index in range(len(paragraphs)):
+        combined = " ".join(re.sub(r"\s+", " ", value).strip() for value in paragraphs[index : index + 2]).strip()
+        if combined:
+            windows.append({"topic": paragraphs[index].strip(), "assignment_text": combined})
+    return windows
+
+
+def _looks_like_assignment(text: str) -> bool:
+    lowered = text.lower()
+    cues = [
+        "verfassen sie", "schreiben sie", "erörtern sie", "nehmen sie", "analysieren sie",
+        "interpretieren sie", "setzen sie sich", "diskutieren sie", "begründen sie",
+        "thema", "aufgabe", "essay", "rede", "stellungnahme",
+    ]
+    return any(cue in lowered for cue in cues) or text.rstrip().endswith("?")
+
+
+def _score_candidate_against_essay(candidate_text: str, essay_text: str) -> int:
+    candidate_tokens = set(_keyword_tokens(candidate_text))
+    essay_tokens = set(_keyword_tokens(essay_text))
+    if not candidate_tokens or not essay_tokens:
+        return 0
+    return len(candidate_tokens & essay_tokens)
+
+
+def _keyword_tokens(text: str) -> list[str]:
+    tokens = re.findall(r"[A-Za-zA-ÖØ-öø-ÿÄÖÜäöüß]{4,}", text.lower())
+    return [token for token in tokens if token not in GERMAN_STOPWORDS]
+
+
+def _derive_topic_from_candidate(topic: str, assignment_text: str) -> str:
+    source = (topic or assignment_text).strip()
+    sentences = re.split(r"(?<=[.!?])\s+", source)
+    first = (sentences[0] if sentences else source).strip()
+    first = re.sub(r"^(thema|aufgabe)\s*[:\-]\s*", "", first, flags=re.IGNORECASE)
+    return normalize_sentence(first).rstrip(".")
+
+
 def list_models(base_url: str) -> list[dict[str, Any]]:
     payload = _http_get_json(f"{base_url}/models", timeout=10)
     models = payload.get("data", [])
@@ -297,7 +423,8 @@ def build_prompt(
             "konstruktiven und lernförderlichen Kommentaren. Markiere konkrete Textstellen mit "
             "präzisen Überarbeitungshinweisen. Zähle für das vierte Kriterium ausschließlich "
             "Grammatik- und Rechtschreibfehler; Zeichensetzungsfehler werden nicht mitgezählt. "
-            "Prüfe den Text konsequent daran, ob er die angegebene Leitfrage oder These einlöst."
+            "Prüfe den Text konsequent daran, ob er die angegebene Leitfrage oder These einlöst. "
+            "Falls keine Leitfrage angegeben ist, arbeite stattdessen streng mit der Aufgabenstellung und dem Thema."
         ),
         "dokumenttyp": type_label,
         "thema": topic or "nicht vorgegeben",

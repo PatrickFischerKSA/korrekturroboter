@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import io
+import os
+import re
+import subprocess
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +60,94 @@ def read_docx_paragraphs(document_bytes: bytes) -> list[str]:
     if not paragraphs:
         raise ValueError("Das DOCX-Dokument enthält keinen auswertbaren Fließtext.")
     return paragraphs
+
+
+def read_reference_paragraphs(file_name: str, document_bytes: bytes) -> list[str]:
+    extension = Path(file_name or "").suffix.lower()
+    if extension == ".docx":
+        return read_docx_paragraphs(document_bytes)
+    if extension in {".txt", ".md"}:
+        return _read_plain_text_paragraphs(document_bytes)
+    if extension == ".pdf":
+        return _read_pdf_paragraphs(document_bytes)
+    raise ValueError("Das Prüfungsdossier muss als DOCX, TXT oder PDF vorliegen.")
+
+
+def _read_plain_text_paragraphs(document_bytes: bytes) -> list[str]:
+    for encoding in ("utf-8", "utf-16", "latin-1"):
+        try:
+            text = document_bytes.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError("Die Textdatei konnte nicht gelesen werden.")
+
+    paragraphs = [line.strip() for line in re.split(r"\n\s*\n|\r\n\s*\r\n", text) if line.strip()]
+    if not paragraphs:
+        raise ValueError("Das Prüfungsdossier enthält keinen auswertbaren Text.")
+    return paragraphs
+
+
+def _read_pdf_paragraphs(document_bytes: bytes) -> list[str]:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+        handle.write(document_bytes)
+        pdf_path = handle.name
+
+    try:
+        extracted = _extract_pdf_text_via_mdls(pdf_path) or _extract_pdf_text_via_strings(pdf_path)
+    finally:
+        try:
+            os.unlink(pdf_path)
+        except OSError:
+            pass
+
+    paragraphs = [line.strip() for line in re.split(r"\n\s*\n|\r\n\s*\r\n", extracted or "") if line.strip()]
+    if not paragraphs:
+        raise ValueError(
+            "Das PDF-Prüfungsdossier konnte nicht ausgelesen werden. Verwende bitte DOCX oder TXT."
+        )
+    return paragraphs
+
+
+def _extract_pdf_text_via_mdls(pdf_path: str) -> str:
+    try:
+        result = subprocess.run(
+            ["mdls", "-raw", "-name", "kMDItemTextContent", pdf_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+
+    output = (result.stdout or "").strip()
+    if result.returncode != 0 or not output or "could not find" in output.lower() or output == "(null)":
+        return ""
+    return output.strip('"')
+
+
+def _extract_pdf_text_via_strings(pdf_path: str) -> str:
+    try:
+        result = subprocess.run(
+            ["strings", "-n", "6", pdf_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+
+    output = result.stdout or ""
+    lines = []
+    for line in output.splitlines():
+        cleaned = re.sub(r"\s+", " ", line).strip()
+        if len(cleaned) < 20:
+            continue
+        if sum(character.isalpha() for character in cleaned) < 12:
+            continue
+        lines.append(cleaned)
+    return "\n".join(lines)
 
 
 def calculate_overall_grade(review: dict) -> float:
