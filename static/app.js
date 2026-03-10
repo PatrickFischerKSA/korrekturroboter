@@ -1,5 +1,7 @@
 const elements = {
   docxFile: document.getElementById("docxFile"),
+  uploadBox: document.getElementById("uploadBox"),
+  fileStatus: document.getElementById("fileStatus"),
   documentType: document.getElementById("documentType"),
   formGuideText: document.getElementById("formGuideText"),
   exampleAssignmentButton: document.getElementById("exampleAssignmentButton"),
@@ -26,6 +28,8 @@ const elements = {
 
 let currentResult = null;
 let assignmentVisible = false;
+let selectedFile = null;
+const PENDING_FILE_KEY = "korrekturroboter_pending_file";
 
 const FORM_GUIDES = {
   auto: {
@@ -91,8 +95,14 @@ elements.downloadButton.addEventListener("click", downloadReview);
 elements.assignmentToggle.addEventListener("click", toggleAssignment);
 elements.exampleAssignmentButton.addEventListener("click", applyExampleAssignment);
 elements.documentType.addEventListener("change", syncFormGuide);
+elements.docxFile.addEventListener("change", handleFileInput);
+elements.uploadBox.addEventListener("dragover", handleDragOver);
+elements.uploadBox.addEventListener("dragleave", handleDragLeave);
+elements.uploadBox.addEventListener("drop", handleDrop);
 
 syncFormGuide();
+elements.reviewButton.disabled = true;
+restorePendingFile();
 
 async function checkHealth() {
   setHealth("LM Studio wird geprüft ...", "");
@@ -116,7 +126,7 @@ async function checkHealth() {
 }
 
 async function generateReview() {
-  const file = elements.docxFile.files[0];
+  const file = selectedFile;
   if (!file) {
     setStatus("Bitte zuerst ein DOCX-Dokument auswählen.", "error");
     return;
@@ -224,6 +234,78 @@ function toggleAssignment() {
     : "Aufgabenstellung eingeben";
 }
 
+function handleFileInput(event) {
+  const [file] = event.target.files || [];
+  setSelectedFile(file || null);
+}
+
+function handleDragOver(event) {
+  event.preventDefault();
+  elements.uploadBox.classList.add("dragover");
+}
+
+function handleDragLeave() {
+  elements.uploadBox.classList.remove("dragover");
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  elements.uploadBox.classList.remove("dragover");
+  const [file] = event.dataTransfer.files || [];
+  setSelectedFile(file || null);
+}
+
+function setSelectedFile(file) {
+  if (!file) {
+    selectedFile = null;
+    elements.reviewButton.disabled = true;
+    elements.fileStatus.textContent = "Noch keine Datei geladen.";
+    elements.fileStatus.className = "status";
+    return;
+  }
+
+  const lowerName = file.name.toLowerCase();
+  if (!lowerName.endsWith(".docx")) {
+    selectedFile = null;
+    elements.reviewButton.disabled = true;
+    elements.fileStatus.textContent = "Ungültige Datei: Bitte eine DOCX-Datei laden.";
+    elements.fileStatus.className = "status error";
+    setStatus("Bitte eine gültige DOCX-Datei laden.", "error");
+    return;
+  }
+
+  selectedFile = file;
+  elements.reviewButton.disabled = false;
+  const sizeKb = (file.size / 1024).toFixed(1);
+  elements.fileStatus.textContent = `Datei geladen: ${file.name} (${sizeKb} KB). Bereit zur Korrektur.`;
+  elements.fileStatus.className = "status ok";
+  setStatus("Datei erfolgreich geladen. Du kannst die Korrektur jetzt starten.", "ok");
+}
+
+function restorePendingFile() {
+  const raw = sessionStorage.getItem(PENDING_FILE_KEY);
+  if (!raw) {
+    return;
+  }
+  sessionStorage.removeItem(PENDING_FILE_KEY);
+
+  try {
+    const payload = JSON.parse(raw);
+    const bytes = base64ToUint8Array(payload.base64);
+    const file = new File([bytes], payload.name || "aufsatz.docx", {
+      type: payload.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    setSelectedFile(file);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") === "1") {
+      setStatus("Demo-Dokument geladen. Du kannst den Ablauf sofort testen.", "ok");
+    }
+  } catch (error) {
+    setSelectedFile(null);
+    setStatus("Die vorbereitete Datei konnte nicht übernommen werden.", "error");
+  }
+}
+
 function applyExampleAssignment() {
   const guide = FORM_GUIDES[elements.documentType.value] || FORM_GUIDES.auto;
   if (!assignmentVisible) {
@@ -275,12 +357,16 @@ function readFileAsBase64(file) {
 }
 
 function base64ToBlob(base64, mimeType) {
+  return new Blob([base64ToUint8Array(base64)], { type: mimeType });
+}
+
+function base64ToUint8Array(base64) {
   const bytes = atob(base64);
   const buffer = new Uint8Array(bytes.length);
   for (let index = 0; index < bytes.length; index += 1) {
     buffer[index] = bytes.charCodeAt(index);
   }
-  return new Blob([buffer], { type: mimeType });
+  return buffer;
 }
 
 function setStatus(message, variant) {

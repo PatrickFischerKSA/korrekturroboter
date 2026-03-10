@@ -3,132 +3,171 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Korrekturroboter</title>
+    <title>Korrekturroboter Start</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
       <section class="hero">
-        <p class="eyebrow">LM Studio . DOCX . Lokal</p>
-        <h1>Korrekturroboter für deutschsprachige Maturaufsatztexte</h1>
+        <p class="eyebrow">Startseite . Lokal . Datenschutzmodus</p>
+        <h1>Korrekturroboter lokal starten</h1>
         <p class="lede">
-          Ein Word-Dokument wird lokal analysiert und als neues DOCX mit roten Fehlermarkierungen,
-          textbezogenen Kommentaren und ausführlichem Lernfeedback zurückgegeben.
+          Diese lokale Startseite ist der Einstieg in die Plattform. Von hier aus öffnest du die
+          Korrekturansicht, prüfst LM Studio und siehst sofort, ob der Datenschutzmodus aktiv ist.
         </p>
       </section>
 
       <section class="panel">
         <div class="panel-head">
-          <h2>1. Eingabe</h2>
-          <p>Die Auswertung bleibt lokal, solange LM Studio lokal auf diesem Gerät oder im internen Netz läuft.</p>
+          <h2>Start</h2>
+          <p>Die Plattform läuft nur lokal und nutzt ausschließlich dein lokales LM Studio.</p>
         </div>
 
-        <div class="grid">
-          <label class="field">
-            <span>Word-Dokument</span>
-            <input id="docxFile" type="file" accept=".docx" />
-          </label>
+        <div class="start-grid">
+          <article class="start-card">
+            <h3>Plattform öffnen</h3>
+            <p>Wechsle direkt zur Korrekturplattform für Upload, Bewertung und DOCX-Export.</p>
+            <a class="button-link primary" href="/plattform.html">Korrekturplattform öffnen</a>
+          </article>
 
-          <label class="field">
-            <span>Form</span>
-            <select id="documentType">
-              <option value="auto">Automatisch erkennen</option>
-              <option value="essay">Essay</option>
-              <option value="speech">Redemanuskript</option>
-              <option value="linear_discussion">Lineare Erörterung</option>
-              <option value="dialectical_discussion">Dialektische Erörterung</option>
-            </select>
-          </label>
+          <article class="start-card">
+            <h3>Eigene Datei laden</h3>
+            <p>Lade hier direkt ein eigenes `.docx` und springe danach sofort in die Plattform.</p>
+            <label class="button-link primary start-upload" for="startDocxFile">Datei laden und Plattform öffnen</label>
+            <input id="startDocxFile" class="visually-hidden" type="file" accept=".docx" />
+          </article>
 
-          <div class="field full-span">
-            <span>Formhilfe</span>
-            <div id="formGuideBox" class="guide-box">
-              <p id="formGuideText" class="guide-text"></p>
-              <div class="inline-actions">
-                <button id="exampleAssignmentButton" class="ghost small" type="button">Beispiel-Aufgabenstellung einsetzen</button>
-                <p id="exampleAssignmentText" class="hint"></p>
-              </div>
-            </div>
-          </div>
+          <article class="start-card">
+            <h3>Demo-Modus</h3>
+            <p>Öffne die Plattform mit einem vorbereiteten Beispieldokument und teste den Ablauf sofort.</p>
+            <button id="demoButton" class="ghost" type="button">Demo-Dokument öffnen</button>
+          </article>
 
-          <label class="field full-span">
-            <span>Thema</span>
-            <input id="topicInput" type="text" placeholder="z. B. Sollten soziale Medien im Unterricht gezielt eingesetzt werden?" />
-          </label>
-
-          <label class="field full-span">
-            <span id="thesisLabel">Leitfrage / These des Aufsatzes</span>
-            <input id="thesisInput" type="text" placeholder="z. B. Der Aufsatz soll zeigen, dass eine dialektische Abwägung nötig ist." />
-          </label>
-
-          <div class="field full-span">
-            <span>Aufgabenstellung</span>
-            <div class="inline-actions">
-              <button id="assignmentToggle" class="ghost small" type="button">Aufgabenstellung eingeben</button>
-              <p class="hint">Die Aufgabenstellung wird in die Bewertung einbezogen, wenn du sie einblendest.</p>
-            </div>
-            <div id="assignmentWrap" class="hidden">
-              <textarea
-                id="assignmentInput"
-                rows="6"
-                placeholder="Aufgabenstellung hier eingeben, z. B. Erörtern Sie die Vor- und Nachteile und nehmen Sie am Schluss begründet Stellung."
-              ></textarea>
-            </div>
-          </div>
-
-          <label class="field">
-            <span>Gym-/FMS-Stufe für Kriterium 4</span>
-            <select id="gymLevel">
-              <option value="1">Stufe 1</option>
-              <option value="2">Stufe 2</option>
-              <option value="3">Stufe 3</option>
-              <option value="4">Stufe 4</option>
-              <option value="1_m_KP">Stufe 1 mit Korrekturprogramm</option>
-              <option value="2_m_KP">Stufe 2 mit Korrekturprogramm</option>
-              <option value="3_m_KP">Stufe 3 mit Korrekturprogramm</option>
-              <option value="4_m_KP">Stufe 4 mit Korrekturprogramm</option>
-            </select>
-          </label>
-
-          <div class="field">
-            <span>Datenschutzmodus</span>
-            <div class="guide-box">
-              <p class="guide-text">LM Studio ist fest auf den lokalen Endpunkt <code>http://127.0.0.1:1234/v1</code> beschränkt.</p>
-            </div>
-          </div>
-
-          <label class="field">
-            <span>Modell (optional)</span>
-            <input id="model" type="text" placeholder="leer lassen für erstes geladenes Modell" />
-          </label>
+          <article class="start-card">
+            <h3>Systemstatus</h3>
+            <p>Prüfe, ob lokales LM Studio erreichbar ist und ein Modell bereitsteht.</p>
+            <button id="healthButton" class="ghost" type="button">Lokales LM Studio prüfen</button>
+          </article>
         </div>
 
-        <div class="actions">
-          <button id="healthButton" class="ghost" type="button">LM Studio prüfen</button>
-          <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
+        <div id="privacyBox" class="status ok">
+          Datenschutzmodus aktiv: Der Dienst arbeitet ausschließlich mit lokalem LM Studio auf localhost.
         </div>
-
-        <div id="statusBox" class="status" aria-live="polite">Bereit.</div>
-        <div id="healthBox" class="health"></div>
-      </section>
-
-      <section id="resultPanel" class="panel hidden">
-        <div class="panel-head">
-          <h2>2. Ergebnis</h2>
-          <p>Die Kriterien 1 bis 3 werden lernförderlich kommentiert; Kriterium 4 zählt nur Grammatik und Rechtschreibung.</p>
-        </div>
-
-        <div id="metadataBox" class="summary"></div>
-        <div id="summaryBox" class="summary"></div>
-        <div id="criteriaGrid" class="criteria-grid"></div>
-        <div id="orthographyBox" class="orthography"></div>
-
-        <div class="actions">
-          <button id="downloadButton" class="primary" type="button">Korrigiertes DOCX herunterladen</button>
-        </div>
+        <div id="startStatus" class="status">Bereit.</div>
+        <div id="healthBox" class="health">Bereit.</div>
       </section>
     </main>
 
-    <script src="/app.js"></script>
+    <script>
+      const startDocxFile = document.getElementById("startDocxFile");
+      const demoButton = document.getElementById("demoButton");
+      const startStatus = document.getElementById("startStatus");
+      const healthButton = document.getElementById("healthButton");
+      const healthBox = document.getElementById("healthBox");
+
+      startDocxFile.addEventListener("change", async (event) => {
+        const [file] = event.target.files || [];
+        if (!file) {
+          return;
+        }
+        if (!file.name.toLowerCase().endsWith(".docx")) {
+          startStatus.textContent = "Ungültige Datei: Bitte ein DOCX-Dokument wählen.";
+          startStatus.className = "status error";
+          return;
+        }
+        startStatus.textContent = "Datei wird vorbereitet und an die Plattform übergeben ...";
+        startStatus.className = "status";
+        try {
+          const base64 = await readFileAsBase64(file);
+          sessionStorage.setItem(
+            "korrekturroboter_pending_file",
+            JSON.stringify({
+              name: file.name,
+              type: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              size: file.size,
+              base64,
+            })
+          );
+          window.location.href = "/plattform.html";
+        } catch (error) {
+          startStatus.textContent = error.message;
+          startStatus.className = "status error";
+        }
+      });
+
+      demoButton.addEventListener("click", async () => {
+        startStatus.textContent = "Demo-Dokument wird geladen ...";
+        startStatus.className = "status";
+        try {
+          const response = await fetch("/demo/demo_aufsatz.docx");
+          if (!response.ok) {
+            throw new Error("Das Demo-Dokument konnte nicht geladen werden.");
+          }
+          const blob = await response.blob();
+          const base64 = await readBlobAsBase64(blob);
+          sessionStorage.setItem(
+            "korrekturroboter_pending_file",
+            JSON.stringify({
+              name: "demo_aufsatz.docx",
+              type: blob.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              size: blob.size,
+              base64,
+            })
+          );
+          window.location.href = "/plattform.html?demo=1";
+        } catch (error) {
+          startStatus.textContent = error.message;
+          startStatus.className = "status error";
+        }
+      });
+
+      healthButton.addEventListener("click", async () => {
+        healthBox.textContent = "Lokales LM Studio wird geprüft ...";
+        healthBox.className = "health";
+        try {
+          const response = await fetch("/api/health");
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
+          }
+          healthBox.textContent = [
+            payload.privacy_notice,
+            `Verbindung erfolgreich: ${payload.base_url}`,
+            `Geladene Modelle: ${payload.models.join(", ")}`,
+            `Standardmodell: ${payload.selected_model}`,
+          ].join("\n");
+          healthBox.className = "health ok";
+        } catch (error) {
+          healthBox.textContent = error.message;
+          healthBox.className = "health error";
+        }
+      });
+
+      function readFileAsBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const commaIndex = result.indexOf(",");
+            resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+          };
+          reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function readBlobAsBase64(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const commaIndex = result.indexOf(",");
+            resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+          };
+          reader.onerror = () => reject(new Error("Das Demo-Dokument konnte nicht verarbeitet werden."));
+          reader.readAsDataURL(blob);
+        });
+      }
+    </script>
   </body>
 </html>

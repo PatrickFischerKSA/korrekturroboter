@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="de-CH">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Korrekturroboter Plattform</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Plattform . DOCX . Lokal</p>
+        <h1>Korrekturplattform für deutschsprachige Maturaufsatztexte</h1>
+        <p class="lede">
+          Lade ein Word-Dokument, lege Form, Thema und Leitfrage fest und erzeuge lokal ein neues
+          DOCX mit Markierungen, Kommentaren und Gesamtfeedback.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>1. Eingabe</h2>
+          <p>Die Auswertung bleibt lokal, solange LM Studio lokal auf diesem Gerät oder im internen Netz läuft.</p>
+        </div>
+
+        <div class="grid">
+          <div class="field full-span">
+            <span>Word-Dokument</span>
+            <label id="uploadBox" class="upload-box" for="docxFile">
+              <strong>DOCX auswählen oder hier hineinziehen</strong>
+              <span>Nur `.docx`-Dateien. Der Dateistatus erscheint sofort darunter.</span>
+            </label>
+            <input id="docxFile" class="visually-hidden" type="file" accept=".docx" />
+            <div id="fileStatus" class="status">Noch keine Datei geladen.</div>
+          </div>
+
+          <label class="field">
+            <span>Form</span>
+            <select id="documentType">
+              <option value="auto">Automatisch erkennen</option>
+              <option value="essay">Essay</option>
+              <option value="speech">Redemanuskript</option>
+              <option value="linear_discussion">Lineare Erörterung</option>
+              <option value="dialectical_discussion">Dialektische Erörterung</option>
+            </select>
+          </label>
+
+          <div class="field full-span">
+            <span>Formhilfe</span>
+            <div id="formGuideBox" class="guide-box">
+              <p id="formGuideText" class="guide-text"></p>
+              <div class="inline-actions">
+                <button id="exampleAssignmentButton" class="ghost small" type="button">Beispiel-Aufgabenstellung einsetzen</button>
+                <p id="exampleAssignmentText" class="hint"></p>
+              </div>
+            </div>
+          </div>
+
+          <label class="field full-span">
+            <span>Thema</span>
+            <input id="topicInput" type="text" placeholder="z. B. Sollten soziale Medien im Unterricht gezielt eingesetzt werden?" />
+          </label>
+
+          <label class="field full-span">
+            <span id="thesisLabel">Leitfrage / These des Aufsatzes</span>
+            <input id="thesisInput" type="text" placeholder="z. B. Der Aufsatz soll zeigen, dass eine dialektische Abwägung nötig ist." />
+          </label>
+
+          <div class="field full-span">
+            <span>Aufgabenstellung</span>
+            <div class="inline-actions">
+              <button id="assignmentToggle" class="ghost small" type="button">Aufgabenstellung eingeben</button>
+              <p class="hint">Die Aufgabenstellung wird in die Bewertung einbezogen, wenn du sie einblendest.</p>
+            </div>
+            <div id="assignmentWrap" class="hidden">
+              <textarea
+                id="assignmentInput"
+                rows="6"
+                placeholder="Aufgabenstellung hier eingeben, z. B. Erörtern Sie die Vor- und Nachteile und nehmen Sie am Schluss begründet Stellung."
+              ></textarea>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Gym-/FMS-Stufe für Kriterium 4</span>
+            <select id="gymLevel">
+              <option value="1">Stufe 1</option>
+              <option value="2">Stufe 2</option>
+              <option value="3">Stufe 3</option>
+              <option value="4">Stufe 4</option>
+              <option value="1_m_KP">Stufe 1 mit Korrekturprogramm</option>
+              <option value="2_m_KP">Stufe 2 mit Korrekturprogramm</option>
+              <option value="3_m_KP">Stufe 3 mit Korrekturprogramm</option>
+              <option value="4_m_KP">Stufe 4 mit Korrekturprogramm</option>
+            </select>
+          </label>
+
+          <div class="field">
+            <span>Datenschutzmodus</span>
+            <div class="guide-box">
+              <p class="guide-text">LM Studio ist fest auf den lokalen Endpunkt <code>http://127.0.0.1:1234/v1</code> beschränkt.</p>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Modell (optional)</span>
+            <input id="model" type="text" placeholder="leer lassen für erstes geladenes Modell" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="healthButton" class="ghost" type="button">LM Studio prüfen</button>
+          <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
+        </div>
+
+        <div id="statusBox" class="status" aria-live="polite">Bereit.</div>
+        <div id="healthBox" class="health"></div>
+      </section>
+
+      <section id="resultPanel" class="panel hidden">
+        <div class="panel-head">
+          <h2>2. Ergebnis</h2>
+          <p>Die Kriterien 1 bis 3 werden lernförderlich kommentiert; Kriterium 4 zählt nur Grammatik und Rechtschreibung.</p>
+        </div>
+
+        <div id="metadataBox" class="summary"></div>
+        <div id="summaryBox" class="summary"></div>
+        <div id="criteriaGrid" class="criteria-grid"></div>
+        <div id="orthographyBox" class="orthography"></div>
+
+        <div class="actions">
+          <button id="downloadButton" class="primary" type="button">Korrigiertes DOCX herunterladen</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
