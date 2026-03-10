@@ -315,36 +315,104 @@ def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: 
 
 
 def _build_dossier_candidates(paragraphs: list[str]) -> list[dict[str, str]]:
+    numbered_candidates = _extract_numbered_topic_candidates(paragraphs)
+    if numbered_candidates:
+        return numbered_candidates
+
     candidates: list[dict[str, str]] = []
+    preface = _collect_instruction_preface(paragraphs)
     for index, paragraph in enumerate(paragraphs):
         cleaned = re.sub(r"\s+", " ", paragraph).strip()
         if not cleaned:
+            continue
+        if _is_generic_instruction(cleaned):
             continue
 
         block = [cleaned]
         if index + 1 < len(paragraphs):
             next_paragraph = re.sub(r"\s+", " ", paragraphs[index + 1]).strip()
-            if next_paragraph and len(next_paragraph) < 420:
+            if next_paragraph and len(next_paragraph) < 420 and not _is_generic_instruction(next_paragraph):
                 block.append(next_paragraph)
 
         combined = " ".join(block).strip()
         if _looks_like_assignment(combined):
             candidates.append(
                 {
-                    "topic": cleaned,
-                    "assignment_text": combined,
+                    "topic": _derive_topic_from_candidate(cleaned, combined),
+                    "assignment_text": f"{preface} {combined}".strip(),
                 }
             )
 
     if candidates:
-        return candidates
+        return _dedupe_candidates(candidates)
 
     windows: list[dict[str, str]] = []
     for index in range(len(paragraphs)):
         combined = " ".join(re.sub(r"\s+", " ", value).strip() for value in paragraphs[index : index + 2]).strip()
-        if combined:
-            windows.append({"topic": paragraphs[index].strip(), "assignment_text": combined})
-    return windows
+        if combined and not _is_generic_instruction(combined):
+            windows.append({"topic": _derive_topic_from_candidate(paragraphs[index].strip(), combined), "assignment_text": combined})
+    return _dedupe_candidates(windows)
+
+
+def _extract_numbered_topic_candidates(paragraphs: list[str]) -> list[dict[str, str]]:
+    cleaned_paragraphs = [re.sub(r"\s+", " ", paragraph).strip() for paragraph in paragraphs if paragraph.strip()]
+    joined = "\n".join(cleaned_paragraphs)
+    pattern = re.compile(
+        r"(?is)(Thema\s*\d+\s*[:.)-]\s*)(.+?)(?=(?:\n\s*Thema\s*\d+\s*[:.)-]\s*)|$)"
+    )
+    matches = list(pattern.finditer(joined))
+    if not matches:
+        return []
+
+    preface = _collect_instruction_preface(cleaned_paragraphs)
+    candidates: list[dict[str, str]] = []
+    for match in matches:
+        body = re.sub(r"\s+", " ", match.group(2)).strip()
+        if not body:
+            continue
+        topic = _derive_topic_from_candidate(body, body)
+        assignment_text = f"{preface} {match.group(1).strip()} {body}".strip()
+        candidates.append({"topic": topic, "assignment_text": assignment_text})
+    return _dedupe_candidates(candidates)
+
+
+def _collect_instruction_preface(paragraphs: list[str]) -> str:
+    parts = []
+    for paragraph in paragraphs[:8]:
+        cleaned = re.sub(r"\s+", " ", paragraph).strip()
+        if not cleaned:
+            continue
+        if _is_generic_instruction(cleaned):
+            parts.append(cleaned)
+    return " ".join(dict.fromkeys(parts))
+
+
+def _is_generic_instruction(text: str) -> bool:
+    lowered = text.lower()
+    cues = [
+        "wählen sie eines der themen",
+        "verfassen sie einen text von etwa",
+        "anzahl der wörter am schluss",
+        "lassen sie sich genug zeit",
+        "setzen sie selbst eine passende überschrift",
+        "zur auseinandersetzung mit der fragestellung",
+    ]
+    return any(cue in lowered for cue in cues)
+
+
+def _dedupe_candidates(candidates: list[dict[str, str]]) -> list[dict[str, str]]:
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        key = (
+            re.sub(r"\s+", " ", candidate.get("topic", "")).strip().lower(),
+            re.sub(r"\s+", " ", candidate.get("assignment_text", "")).strip().lower(),
+        )
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
 
 
 def _looks_like_assignment(text: str) -> bool:
@@ -371,11 +439,21 @@ def _keyword_tokens(text: str) -> list[str]:
 
 
 def _derive_topic_from_candidate(topic: str, assignment_text: str) -> str:
-    source = (topic or assignment_text).strip()
-    sentences = re.split(r"(?<=[.!?])\s+", source)
-    first = (sentences[0] if sentences else source).strip()
-    first = re.sub(r"^(thema|aufgabe)\s*[:\-]\s*", "", first, flags=re.IGNORECASE)
-    return normalize_sentence(first).rstrip(".")
+    source = re.sub(r"\s+", " ", (topic or assignment_text).strip())
+    source = re.sub(r"(?i)^thema\s*\d+\s*[:.)-]?\s*", "", source)
+    if "?" in source:
+        question = source.split("?", 1)[0].strip()
+        if question:
+            return normalize_sentence(f"{question}?").rstrip(".")
+    parts = re.split(r"(?<=[.!?])\s+|:\s+", source)
+    for part in parts:
+        cleaned = part.strip()
+        if not cleaned or _is_generic_instruction(cleaned):
+            continue
+        if len(cleaned) > 140:
+            continue
+        return normalize_sentence(cleaned).rstrip(".")
+    return normalize_sentence(source[:140]).rstrip(".")
 
 
 def list_models(base_url: str) -> list[dict[str, Any]]:
@@ -636,7 +714,6 @@ def run_review(
         {
             "model": model_name,
             "temperature": 0.2,
-            "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
