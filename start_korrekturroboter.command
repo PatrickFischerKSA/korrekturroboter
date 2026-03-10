@@ -26,6 +26,30 @@ is_running() {
   curl -sf "http://127.0.0.1:${port}" >/dev/null 2>&1
 }
 
+stop_existing_server() {
+  if [[ -f "$PID_FILE" ]]; then
+    local old_pid
+    old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$old_pid" ]]; then
+      kill "$old_pid" >/dev/null 2>&1 || true
+      sleep 0.5
+    fi
+  fi
+
+  if [[ -f "$PORT_FILE" ]]; then
+    local old_port
+    old_port="$(cat "$PORT_FILE" 2>/dev/null || true)"
+    if [[ -n "$old_port" ]]; then
+      local listener_pid
+      listener_pid="$(lsof -ti "tcp:${old_port}" 2>/dev/null | head -n 1 || true)"
+      if [[ -n "$listener_pid" ]]; then
+        kill "$listener_pid" >/dev/null 2>&1 || true
+        sleep 0.5
+      fi
+    fi
+  fi
+}
+
 show_error() {
   local message="$1"
   osascript -e "display alert \"Korrekturroboter konnte nicht gestartet werden.\" message \"${message}\" as critical"
@@ -36,10 +60,7 @@ if [[ -f "$PORT_FILE" ]]; then
   PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
 fi
 
-if [[ -n "$PORT" ]] && is_running "$PORT"; then
-  open "http://127.0.0.1:${PORT}"
-  exit 0
-fi
+stop_existing_server
 
 PORT="$(find_free_port)"
 if [[ -z "$PORT" ]]; then
@@ -61,7 +82,7 @@ done
 
 DETAILS="Prüfe die Datei .korrekturroboter.log im Projektordner."
 if [[ -f "$LOG_FILE" ]]; then
-  TAIL_OUTPUT="$(tail -n 8 "$LOG_FILE" | tr '\n' ' ' | sed 's/\"/'\"'\"'/g')"
+  TAIL_OUTPUT="$(tail -n 8 "$LOG_FILE" | tr '\n' ' ' | sed "s/\"/'/g")"
   if [[ -n "$TAIL_OUTPUT" ]]; then
     DETAILS="$TAIL_OUTPUT"
   fi
