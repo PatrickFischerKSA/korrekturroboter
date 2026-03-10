@@ -457,7 +457,7 @@ function renderDossierCandidates() {
     .map((candidate, index) => {
       const checked = index === 0 ? "checked" : "";
       const title = candidate.topic || `Thema ${index + 1}`;
-      const assignment = candidate.assignment_text || "Keine Aufgabenstellung erkannt.";
+      const assignment = truncateText(candidate.assignment_text || "Keine Aufgabenstellung erkannt.", 260);
       const typeLabel = candidate.document_type_label || candidate.document_type || "Automatisch";
       const score = Number(candidate.match_score || 0);
       return `
@@ -674,4 +674,12 @@ function escapeHtml(value) {
 
 function formatText(value) {
   return escapeHtml(value).replaceAll("\n", "<br />");
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
