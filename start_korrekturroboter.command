@@ -3,15 +3,56 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+PORT_FILE="$SCRIPT_DIR/.korrekturroboter.port"
+PID_FILE="$SCRIPT_DIR/.korrekturroboter.pid"
+LOG_FILE="$SCRIPT_DIR/.korrekturroboter.log"
 
-if ! python3 -c "import requests" >/dev/null 2>&1; then
-  python3 -m pip install -r requirements.txt
+find_free_port() {
+  python3 - <<'PY'
+import socket
+for port in (8090, 8091, 8092, 8093, 8094, 8095, 8765, 8877):
+    with socket.socket() as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+        print(port)
+        break
+PY
+}
+
+is_running() {
+  local port="$1"
+  curl -sf "http://127.0.0.1:${port}" >/dev/null 2>&1
+}
+
+PORT=""
+if [[ -f "$PORT_FILE" ]]; then
+  PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
 fi
 
-python3 server.py &
-SERVER_PID=$!
+if [[ -n "$PORT" ]] && is_running "$PORT"; then
+  open "http://127.0.0.1:${PORT}"
+  exit 0
+fi
 
-sleep 2
-open "http://127.0.0.1:8090"
+PORT="$(find_free_port)"
+if [[ -z "$PORT" ]]; then
+  osascript -e 'display alert "Korrekturroboter konnte nicht gestartet werden." message "Es ist kein freier lokaler Port verfügbar." as critical'
+  exit 1
+fi
 
-wait $SERVER_PID
+echo "$PORT" >"$PORT_FILE"
+KORREKTURROBOTER_PORT="$PORT" nohup python3 server.py >"$LOG_FILE" 2>&1 &
+echo $! >"$PID_FILE"
+
+for _ in {1..40}; do
+  if is_running "$PORT"; then
+    open "http://127.0.0.1:${PORT}"
+    exit 0
+  fi
+  sleep 0.5
+done
+
+osascript -e 'display alert "Korrekturroboter konnte nicht gestartet werden." message "Prüfe die Datei .korrekturroboter.log im Projektordner." as critical'
+exit 1

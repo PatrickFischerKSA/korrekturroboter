@@ -3,8 +3,7 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any
-
-import requests
+from urllib import error, request
 
 
 LM_STUDIO_BASE_URL = os.environ.get("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
@@ -194,6 +193,12 @@ class ReviewError(RuntimeError):
     pass
 
 
+class LMStudioHTTPError(ReviewError):
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @dataclass
 class OrthographyResult:
     error_count: int
@@ -247,14 +252,19 @@ def detect_document_type(text: str, requested_type: str, assignment_text: str = 
     return "essay"
 
 
+def list_models(base_url: str) -> list[dict[str, Any]]:
+    payload = _http_get_json(f"{base_url}/models", timeout=10)
+    models = payload.get("data", [])
+    if not isinstance(models, list):
+        raise ReviewError("LM Studio hat ein ungültiges Modellformat geliefert.")
+    return models
+
+
 def fetch_model(base_url: str) -> str:
     if LM_STUDIO_MODEL:
         return LM_STUDIO_MODEL
 
-    response = requests.get(f"{base_url}/models", timeout=10)
-    response.raise_for_status()
-    payload = response.json()
-    models = payload.get("data", [])
+    models = list_models(base_url)
     if not models:
         raise ReviewError("LM Studio liefert keine Modelle. Bitte in LM Studio ein Modell laden.")
     return models[0]["id"]
@@ -494,10 +504,9 @@ def run_review(
         thesis=thesis,
     )
 
-    response = requests.post(
+    payload = _http_post_json(
         f"{base_url}/chat/completions",
-        headers={"Content-Type": "application/json"},
-        json={
+        {
             "model": model_name,
             "temperature": 0.2,
             "response_format": {"type": "json_object"},
@@ -508,8 +517,6 @@ def run_review(
         },
         timeout=180,
     )
-    response.raise_for_status()
-    payload = response.json()
     content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
     normalized = normalize_review(
         parse_json_response(content),
@@ -523,3 +530,44 @@ def run_review(
     normalized["model"] = model_name
     normalized["base_url"] = base_url
     return normalized
+
+
+def _http_get_json(url: str, timeout: int) -> dict[str, Any]:
+    req = request.Request(url, method="GET")
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        raise LMStudioHTTPError(exc.code, _read_http_error(exc)) from exc
+    except error.URLError as exc:
+        raise ReviewError(f"LM Studio ist nicht erreichbar: {exc.reason}") from exc
+
+
+def _http_post_json(url: str, payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+    req = request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        raise LMStudioHTTPError(exc.code, _read_http_error(exc)) from exc
+    except error.URLError as exc:
+        raise ReviewError(f"LM Studio ist nicht erreichbar: {exc.reason}") from exc
+
+
+def _read_http_error(exc: error.HTTPError) -> str:
+    try:
+        payload = json.loads(exc.read().decode("utf-8"))
+    except Exception:
+        return f"LM Studio antwortete mit HTTP {exc.code}."
+    if isinstance(payload, dict):
+        inner = payload.get("error")
+        if isinstance(inner, dict) and inner.get("message"):
+            return str(inner["message"])
+        if isinstance(inner, str):
+            return inner
+    return f"LM Studio antwortete mit HTTP {exc.code}."

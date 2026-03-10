@@ -9,20 +9,22 @@ Die GitHub-Seite zeigt nur Dateien und das `README.md`.
 
 Die Anwendung startest du **lokal auf deinem Mac** per Doppelklick auf:
 
-- `START_HIER.command`
+- `Korrekturroboter.app`
 
-Falls du im Finder arbeitest, öffne einfach den Ordner `korrekturroboter` und doppelklicke auf `START_HIER.command`.
+Falls du im Finder arbeitest, öffne einfach den Ordner `korrekturroboter` und doppelklicke auf `Korrekturroboter.app`.
+
+Alternativ:
+
+- `START_HIER.command`
 
 ## Direkt starten
 
 ```bash
 cd "/Users/patrickfischer/Documents/New project/korrekturroboter"
-./START_HIER.command
+open Korrekturroboter.app
 ```
 
-Danach öffnet sich die Plattform unter:
-
-[http://127.0.0.1:8090](http://127.0.0.1:8090)
+Danach öffnet sich die Plattform automatisch in deinem Browser auf einem freien lokalen Port.
 
 Dort stehen jetzt direkt zur Verfügung:
 
@@ -33,7 +35,6 @@ Dort stehen jetzt direkt zur Verfügung:
 Alternativ manuell:
 
 ```bash
-python3 -m pip install -r requirements.txt
 python3 server.py
 ```
 
@@ -64,7 +65,7 @@ Die Anwendung nimmt ein `.docx` entgegen, analysiert es lokal über LM Studio un
 
 Die Anwendung ist für den lokalen Betrieb mit LM Studio gebaut. Im harten Datenschutzmodus akzeptiert der Server nur lokale LM-Studio-Endpunkte auf `127.0.0.1`, `localhost` oder `::1`. Externe LM-Studio-URLs werden technisch abgewiesen.
 
-Zusätzlich startet der Server nur noch, wenn lokales LM Studio erreichbar ist und mindestens ein Modell geladen wurde.
+Der Server startet lokal auch dann, wenn LM Studio noch nicht bereit ist. Der LM-Studio-Status wird in der Weboberfläche geprüft und dort klar angezeigt.
 
 ## Voraussetzungen
 

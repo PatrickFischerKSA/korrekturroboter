@@ -8,10 +8,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-import requests
-
 from docx_pipeline import build_reviewed_docx, read_docx_paragraphs
-from review_engine import LM_STUDIO_BASE_URL, ReviewError, fetch_model, run_review
+from review_engine import LM_STUDIO_BASE_URL, LMStudioHTTPError, ReviewError, fetch_model, list_models, run_review
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -59,10 +57,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
     def _handle_health(self) -> None:
         base_url = _strict_local_base_url(LM_STUDIO_BASE_URL)
         try:
-            response = requests.get(f"{base_url}/models", timeout=10)
-            response.raise_for_status()
-            payload = response.json()
-            models = [entry.get("id", "") for entry in payload.get("data", []) if entry.get("id")]
+            models = [entry.get("id", "") for entry in list_models(base_url) if entry.get("id")]
             if not models:
                 raise ReviewError("LM Studio ist erreichbar, liefert aber keine geladenen Modelle.")
             self._send_json(
@@ -134,9 +129,8 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
             self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
         except ValueError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
-        except requests.HTTPError as exc:
-            message = _extract_http_error(exc)
-            self._send_json({"ok": False, "error": message}, status=HTTPStatus.BAD_GATEWAY)
+        except LMStudioHTTPError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
         except Exception as exc:
             self._send_json({"ok": False, "error": f"Interner Fehler: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -158,24 +152,6 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-
-def _extract_http_error(error: requests.HTTPError) -> str:
-    response = error.response
-    if response is None:
-        return str(error)
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = None
-    if isinstance(payload, dict):
-        inner = payload.get("error")
-        if isinstance(inner, dict) and inner.get("message"):
-            return str(inner["message"])
-        if isinstance(inner, str):
-            return inner
-    return f"LM Studio antwortete mit HTTP {response.status_code}."
-
-
 def _strict_local_base_url(candidate: str) -> str:
     normalized = (candidate or LM_STUDIO_BASE_URL).rstrip("/")
     parsed = urlparse(normalized)
@@ -192,23 +168,11 @@ def _strict_local_bind_host(candidate: str) -> str:
     return candidate
 
 
-def _ensure_local_lm_studio_ready() -> str:
-    base_url = _strict_local_base_url(LM_STUDIO_BASE_URL)
-    try:
-        model_name = fetch_model(base_url)
-    except Exception as exc:
-        raise ReviewError(
-            "Serverstart abgebrochen: Lokales LM Studio ist nicht erreichbar oder es ist kein Modell geladen."
-        ) from exc
-    return model_name
-
-
 def main() -> None:
     bind_host = _strict_local_bind_host(HOST)
-    model_name = _ensure_local_lm_studio_ready()
     server = ThreadingHTTPServer((bind_host, PORT), KorrekturHandler)
     print(PRIVACY_NOTICE)
-    print(f"Lokales LM-Studio-Modell bereit: {model_name}")
+    print("Hinweis: LM Studio wird erst in der Weboberfläche geprüft.")
     print(f"Korrekturroboter läuft auf http://{bind_host}:{PORT}")
     server.serve_forever()
 
