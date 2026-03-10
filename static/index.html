@@ -125,7 +125,7 @@
       checkHealth();
 
       async function checkHealth() {
-        healthBox.textContent = "Lokales LM Studio wird geprüft ...";
+        healthBox.innerHTML = "Lokales LM Studio wird geprüft ...";
         healthBox.className = "health";
         try {
           const response = await fetch("/api/health");
@@ -133,17 +133,55 @@
           if (!response.ok || !payload.ok) {
             throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
           }
-          healthBox.textContent = [
+          healthBox.innerHTML = formatStatusMarkup([
             payload.privacy_notice,
             `Verbindung erfolgreich: ${payload.base_url}`,
             `Geladene Modelle: ${payload.models.join(", ")}`,
             `Standardmodell: ${payload.selected_model}`,
-          ].join("\n");
+          ].join("\n"));
           healthBox.className = "health ok";
         } catch (error) {
-          healthBox.textContent = error.message;
+          healthBox.innerHTML = formatStatusMarkup(buildLmStudioHelp(error.message));
           healthBox.className = "health error";
         }
+      }
+
+      function formatStatusMarkup(message) {
+        return String(message)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;")
+          .replaceAll("\n\n", "<br /><br />")
+          .replaceAll("\n", "<br />");
+      }
+
+      function buildLmStudioHelp(message) {
+        const normalized = String(message || "").trim();
+        const lower = normalized.toLowerCase();
+        if (lower.includes("connection refused") || lower.includes("could not connect") || lower.includes("nicht erreichbar")) {
+          return [
+            "LM Studio antwortet nicht auf http://127.0.0.1:1234/v1.",
+            "So behebst du das:",
+            "1. LM Studio öffnen.",
+            "2. Ein Modell laden oder herunterladen.",
+            "3. In LM Studio den lokalen Server auf Port 1234 starten.",
+            '4. Danach hier erneut auf "Lokales LM Studio prüfen" klicken.',
+            `Technische Meldung: ${normalized}`,
+          ].join("\n");
+        }
+        if (lower.includes("keine geladenen modelle")) {
+          return [
+            "LM Studio läuft, aber es ist noch kein Modell geladen.",
+            "So behebst du das:",
+            "1. In LM Studio ein passendes lokales Modell laden.",
+            "2. Den lokalen Server aktiv lassen.",
+            "3. Danach die Prüfung erneut starten.",
+            `Technische Meldung: ${normalized}`,
+          ].join("\n");
+        }
+        return normalized;
       }
 
       function readFileAsBase64(file) {
