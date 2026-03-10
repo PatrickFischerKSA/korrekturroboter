@@ -26,6 +26,10 @@ open Korrekturroboter.app
 
 Danach öffnet sich die Plattform automatisch in deinem Browser auf einem freien lokalen Port.
 
+Falls der Start fehlschlägt, findest du die genaue Ursache in:
+
+- `.korrekturroboter.log`
+
 Dort stehen jetzt direkt zur Verfügung:
 
 - eine lokale Startseite mit Button zur Korrekturplattform

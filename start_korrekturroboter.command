@@ -26,6 +26,11 @@ is_running() {
   curl -sf "http://127.0.0.1:${port}" >/dev/null 2>&1
 }
 
+show_error() {
+  local message="$1"
+  osascript -e "display alert \"Korrekturroboter konnte nicht gestartet werden.\" message \"${message}\" as critical"
+}
+
 PORT=""
 if [[ -f "$PORT_FILE" ]]; then
   PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
@@ -38,7 +43,7 @@ fi
 
 PORT="$(find_free_port)"
 if [[ -z "$PORT" ]]; then
-  osascript -e 'display alert "Korrekturroboter konnte nicht gestartet werden." message "Es ist kein freier lokaler Port verfügbar." as critical'
+  show_error "Es ist kein freier lokaler Port verfügbar."
   exit 1
 fi
 
@@ -54,5 +59,13 @@ for _ in {1..40}; do
   sleep 0.5
 done
 
-osascript -e 'display alert "Korrekturroboter konnte nicht gestartet werden." message "Prüfe die Datei .korrekturroboter.log im Projektordner." as critical'
+DETAILS="Prüfe die Datei .korrekturroboter.log im Projektordner."
+if [[ -f "$LOG_FILE" ]]; then
+  TAIL_OUTPUT="$(tail -n 8 "$LOG_FILE" | tr '\n' ' ' | sed 's/\"/'\"'\"'/g')"
+  if [[ -n "$TAIL_OUTPUT" ]]; then
+    DETAILS="$TAIL_OUTPUT"
+  fi
+fi
+
+show_error "$DETAILS"
 exit 1
