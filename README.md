@@ -24,6 +24,12 @@ Danach öffnet sich die Plattform unter:
 
 [http://127.0.0.1:8090](http://127.0.0.1:8090)
 
+Dort stehen jetzt direkt zur Verfügung:
+
+- eine lokale Startseite mit Button zur Korrekturplattform
+- ein großer Button zum Laden eines eigenen `.docx`
+- ein Demo-Modus mit vorbereitetem Beispieldokument
+
 Alternativ manuell:
 
 ```bash
