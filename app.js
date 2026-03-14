@@ -1,0 +1,731 @@
+const elements = {
+  docxFile: document.getElementById("docxFile"),
+  uploadBox: document.getElementById("uploadBox"),
+  fileStatus: document.getElementById("fileStatus"),
+  dossierFile: document.getElementById("dossierFile"),
+  dossierUploadBox: document.getElementById("dossierUploadBox"),
+  dossierStatus: document.getElementById("dossierStatus"),
+  dossierCandidateSection: document.getElementById("dossierCandidateSection"),
+  dossierCandidateList: document.getElementById("dossierCandidateList"),
+  confirmDossierButton: document.getElementById("confirmDossierButton"),
+  dossierConfirmStatus: document.getElementById("dossierConfirmStatus"),
+  documentType: document.getElementById("documentType"),
+  formQuickButtons: Array.from(document.querySelectorAll(".quick-form-button")),
+  formGuideText: document.getElementById("formGuideText"),
+  exampleAssignmentButton: document.getElementById("exampleAssignmentButton"),
+  exampleAssignmentText: document.getElementById("exampleAssignmentText"),
+  topicInput: document.getElementById("topicInput"),
+  thesisLabel: document.getElementById("thesisLabel"),
+  thesisInput: document.getElementById("thesisInput"),
+  assignmentToggle: document.getElementById("assignmentToggle"),
+  dossierDetectButton: document.getElementById("dossierDetectButton"),
+  assignmentWrap: document.getElementById("assignmentWrap"),
+  assignmentInput: document.getElementById("assignmentInput"),
+  gymLevel: document.getElementById("gymLevel"),
+  model: document.getElementById("model"),
+  healthButton: document.getElementById("healthButton"),
+  reviewButton: document.getElementById("reviewButton"),
+  resetButton: document.getElementById("resetButton"),
+  statusBox: document.getElementById("statusBox"),
+  healthBox: document.getElementById("healthBox"),
+  resultPanel: document.getElementById("resultPanel"),
+  metadataBox: document.getElementById("metadataBox"),
+  summaryBox: document.getElementById("summaryBox"),
+  criteriaGrid: document.getElementById("criteriaGrid"),
+  orthographyBox: document.getElementById("orthographyBox"),
+  downloadButton: document.getElementById("downloadButton"),
+};
+
+let currentResult = null;
+let assignmentVisible = false;
+let selectedFile = null;
+let selectedDossier = null;
+let dossierCandidates = [];
+let confirmedDossierIndex = -1;
+let dossierConfirmationRequired = false;
+const PENDING_FILE_KEY = "korrekturroboter_pending_file";
+
+const FORM_GUIDES = {
+  auto: {
+    guide:
+      "Automatische Erkennung ist möglich. Für eine verlässliche Korrektur ist die manuelle Formwahl jedoch besser, vor allem bei Erörterungen.",
+    example:
+      "Beispiel: Analysieren Sie den Text und verfassen Sie eine passende, klar strukturierte Stellungnahme.",
+    topicPlaceholder:
+      "z. B. Sollten soziale Medien im Unterricht gezielt eingesetzt werden?",
+    thesisLabel: "Leitfrage / These des Aufsatzes",
+    thesisPlaceholder:
+      "z. B. Der Text soll eine klare Kernfrage verfolgen oder eine tragfähige Hauptthese entfalten.",
+  },
+  essay: {
+    guide:
+      "Der Essay braucht eine eigenständige, reflektierte Position. Wichtig sind gedankliche Tiefe, persönliche Stimme und ein klarer roter Faden.",
+    example:
+      "Beispiel: Setzen Sie sich in essayistischer Form persönlich und differenziert mit der Frage auseinander, was gesellschaftliche Verantwortung heute bedeutet.",
+    topicPlaceholder:
+      "z. B. Was bedeutet Freiheit im digitalen Alltag?",
+    thesisLabel: "Leitfrage / These des Aufsatzes",
+    thesisPlaceholder:
+      "z. B. Der Essay zeigt, dass Freiheit ohne Selbstbegrenzung in neue Abhängigkeiten umschlagen kann.",
+  },
+  speech: {
+    guide:
+      "Beim Redemanuskript zählen Adressatenbezug, klare Botschaft, wirkungsvolle Dramaturgie und ein redeartiger Stil.",
+    example:
+      "Beispiel: Verfassen Sie ein Redemanuskript für eine Maturfeier und überzeugen Sie Ihr Publikum davon, dass Bildung Mut zur Verantwortung verlangt.",
+    topicPlaceholder:
+      "z. B. Warum Verantwortung zur Bildung gehört",
+    thesisLabel: "Leitgedanke / Kernbotschaft der Rede",
+    thesisPlaceholder:
+      "z. B. Die Rede soll zeigen, dass Bildung erst dann wirksam wird, wenn sie in verantwortliches Handeln führt.",
+  },
+  linear_discussion: {
+    guide:
+      "Die lineare Erörterung braucht eine klare Grundhaltung. Die Argumente müssen steigernd angeordnet sein und in ein begründetes Gesamturteil münden.",
+    example:
+      "Beispiel: Warum ist eine gute Schulbildung heute wichtiger denn je?",
+    topicPlaceholder:
+      "z. B. Warum ist eine gute Schulbildung heute wichtiger denn je?",
+    thesisLabel: "Leitfrage / Grundthese der Erörterung",
+    thesisPlaceholder:
+      "z. B. Der Aufsatz soll begründen, warum breite Bildung langfristig mehr Chancen und Urteilskraft schafft.",
+  },
+  dialectical_discussion: {
+    guide:
+      "Die dialektische Erörterung muss die Streitfrage offenlegen, Pro und Contra klar führen, einen Wendepunkt markieren und auf ein bewusst starkes Schlussargument zusteuern.",
+    example:
+      "Beispiel: Erörtern Sie die Vor- und Nachteile des frühen Computereinsatzes im Kindergarten und nehmen Sie am Schluss Stellung.",
+    topicPlaceholder:
+      "z. B. Sollten Computer bereits im Kindergarten eingeführt werden?",
+    thesisLabel: "Leitfrage / vorläufige Position der Erörterung",
+    thesisPlaceholder:
+      "z. B. Der Aufsatz soll abwägen, ob der Nutzen früher Digitalisierung die pädagogischen Risiken wirklich überwiegt.",
+  },
+};
+
+elements.healthButton.addEventListener("click", checkHealth);
+elements.reviewButton.addEventListener("click", generateReview);
+elements.resetButton.addEventListener("click", resetFormState);
+elements.downloadButton.addEventListener("click", downloadReview);
+elements.assignmentToggle.addEventListener("click", toggleAssignment);
+elements.exampleAssignmentButton.addEventListener("click", applyExampleAssignment);
+elements.dossierDetectButton.addEventListener("click", detectDossierContext);
+elements.confirmDossierButton.addEventListener("click", confirmSelectedDossierCandidate);
+elements.documentType.addEventListener("change", syncFormGuide);
+elements.formQuickButtons.forEach((button) => {
+  button.addEventListener("click", () => setDocumentTypeFromQuickButton(button.dataset.form || "auto"));
+});
+elements.docxFile.addEventListener("change", handleFileInput);
+elements.dossierFile.addEventListener("change", handleDossierInput);
+elements.uploadBox.addEventListener("dragover", handleDragOver);
+elements.uploadBox.addEventListener("dragleave", handleDragLeave);
+elements.uploadBox.addEventListener("drop", handleDrop);
+elements.dossierUploadBox.addEventListener("dragover", handleDossierDragOver);
+elements.dossierUploadBox.addEventListener("dragleave", handleDossierDragLeave);
+elements.dossierUploadBox.addEventListener("drop", handleDossierDrop);
+
+syncFormGuide();
+updateReviewButtonState();
+restorePendingFile();
+
+async function checkHealth() {
+  setHealth("LM Studio wird geprüft ...", "");
+  try {
+    const response = await fetch("/api/health");
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
+    }
+
+    const lines = [
+      payload.privacy_notice,
+      `Verbindung erfolgreich: ${payload.base_url}`,
+      `Geladene Modelle: ${payload.models.join(", ")}`,
+      `Standardmodell: ${payload.selected_model}`,
+    ];
+    setHealth(lines.join("\n"), "ok");
+  } catch (error) {
+    setHealth(buildLmStudioHelp(error.message), "error");
+  }
+}
+
+async function generateReview() {
+  const file = selectedFile;
+  if (!file) {
+    setStatus("Bitte zuerst ein DOCX-Dokument auswählen.", "error");
+    return;
+  }
+  if (dossierConfirmationRequired) {
+    setStatus("Bitte zuerst das erkannte Thema aus dem Prüfungsdossier bestätigen.", "error");
+    return;
+  }
+
+  setStatus("DOCX wird lokal vorbereitet und an LM Studio übergeben ...", "");
+  elements.reviewButton.disabled = true;
+
+  try {
+    const documentBase64 = await readFileAsBase64(file);
+    const dossierBase64 = selectedDossier ? await readFileAsBase64(selectedDossier) : "";
+    const response = await fetch("/api/review", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        document_base64: documentBase64,
+        dossier_name: selectedDossier ? selectedDossier.name : "",
+        dossier_base64: dossierBase64,
+        document_type: elements.documentType.value,
+        topic: elements.topicInput.value.trim(),
+        thesis: elements.thesisInput.value.trim(),
+        assignment_text: assignmentVisible ? elements.assignmentInput.value.trim() : "",
+        gym_level: elements.gymLevel.value,
+        model: elements.model.value.trim(),
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Die Auswertung ist fehlgeschlagen.");
+    }
+
+    currentResult = payload;
+    renderResult(payload.review);
+    setStatus("Korrigiertes DOCX wurde erfolgreich erzeugt.", "ok");
+  } catch (error) {
+    currentResult = null;
+    elements.resultPanel.classList.add("hidden");
+    setStatus(buildLmStudioHelp(error.message), "error");
+  } finally {
+    elements.reviewButton.disabled = false;
+  }
+}
+
+function renderResult(review) {
+  elements.resultPanel.classList.remove("hidden");
+  const metadata = [];
+  const dossierContext = currentResult?.dossier_context || {};
+  if (review.privacy_notice) {
+    metadata.push(`<strong>${escapeHtml(review.privacy_notice)}</strong>`);
+  }
+  if (dossierContext.match_label) {
+    metadata.push(`Dossier-Abgleich: ${escapeHtml(dossierContext.match_label)}`);
+  }
+  metadata.push(`Form: ${escapeHtml(review.document_type_label || "nicht bestimmt")}`);
+  if (review.topic) {
+    metadata.push(`Thema: ${escapeHtml(review.topic)}`);
+  }
+  if (review.thesis) {
+    metadata.push(`Leitfrage / These: ${escapeHtml(review.thesis)}`);
+  }
+  if (review.assignment_text) {
+    metadata.push(`Aufgabenstellung: ${formatText(review.assignment_text)}`);
+  }
+  elements.metadataBox.innerHTML = `
+    <h3>Bewertungsrahmen</h3>
+    <p>${metadata.join("<br />")}</p>
+  `;
+  elements.summaryBox.innerHTML = `
+    <h3>Kurzzusammenfassung</h3>
+    <p>${formatText(review.summary || "Keine Zusammenfassung vorhanden.")}</p>
+  `;
+
+  const labels = {
+    inhalt: "Kriterium 1 - Inhalt",
+    aufbau: "Kriterium 2 - Aufbau",
+    ausdruck: "Kriterium 3 - Ausdruck",
+  };
+  elements.criteriaGrid.innerHTML = ["inhalt", "aufbau", "ausdruck"]
+    .map((key) => {
+      const entry = review.criteria_comments[key];
+      return `
+        <article class="criteria-card">
+          <h3>${labels[key]}</h3>
+          <div class="score">Teilnote ${Number(entry.score).toFixed(2)}</div>
+          <p>${formatText(entry.comment)}</p>
+        </article>
+      `;
+    })
+    .join("");
+
+  const orthography = review.orthography;
+  elements.orthographyBox.innerHTML = `
+    <h3>Kriterium 4 - Sprachliche Korrektheit</h3>
+    <div class="score">Teilnote ${Number(orthography.grade).toFixed(2)}</div>
+    <p>${formatText(orthography.comment)}</p>
+  `;
+}
+
+function toggleAssignment() {
+  assignmentVisible = !assignmentVisible;
+  elements.assignmentWrap.classList.toggle("hidden", !assignmentVisible);
+  elements.assignmentToggle.textContent = assignmentVisible
+    ? "Aufgabenstellung ausblenden"
+    : "Aufgabenstellung eingeben";
+}
+
+function handleFileInput(event) {
+  const [file] = event.target.files || [];
+  setSelectedFile(file || null);
+}
+
+function handleDossierInput(event) {
+  const [file] = event.target.files || [];
+  setSelectedDossier(file || null);
+}
+
+function handleDragOver(event) {
+  event.preventDefault();
+  elements.uploadBox.classList.add("dragover");
+}
+
+function handleDragLeave() {
+  elements.uploadBox.classList.remove("dragover");
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  elements.uploadBox.classList.remove("dragover");
+  const [file] = event.dataTransfer.files || [];
+  setSelectedFile(file || null);
+}
+
+function handleDossierDragOver(event) {
+  event.preventDefault();
+  elements.dossierUploadBox.classList.add("dragover");
+}
+
+function handleDossierDragLeave() {
+  elements.dossierUploadBox.classList.remove("dragover");
+}
+
+function handleDossierDrop(event) {
+  event.preventDefault();
+  elements.dossierUploadBox.classList.remove("dragover");
+  const [file] = event.dataTransfer.files || [];
+  setSelectedDossier(file || null);
+}
+
+function setSelectedFile(file) {
+  if (!file) {
+    selectedFile = null;
+    elements.fileStatus.textContent = "Noch keine Datei geladen.";
+    elements.fileStatus.className = "status";
+    updateReviewButtonState();
+    return;
+  }
+
+  const lowerName = file.name.toLowerCase();
+  if (!lowerName.endsWith(".docx")) {
+    selectedFile = null;
+    elements.fileStatus.textContent = "Ungültige Datei: Bitte eine DOCX-Datei laden.";
+    elements.fileStatus.className = "status error";
+    setStatus("Bitte eine gültige DOCX-Datei laden.", "error");
+    updateReviewButtonState();
+    return;
+  }
+
+  selectedFile = file;
+  const sizeKb = (file.size / 1024).toFixed(1);
+  elements.fileStatus.textContent = `Datei geladen: ${file.name} (${sizeKb} KB). Bereit zur Korrektur.`;
+  elements.fileStatus.className = "status ok";
+  setStatus("Datei erfolgreich geladen. Du kannst die Korrektur jetzt starten.", "ok");
+  if (selectedDossier) {
+    dossierConfirmationRequired = true;
+  }
+  updateReviewButtonState();
+  maybeAutoDetectDossierContext();
+}
+
+function setSelectedDossier(file) {
+  if (!file) {
+    selectedDossier = null;
+    clearDossierCandidates();
+    elements.dossierStatus.textContent = "Noch kein Prüfungsdossier geladen.";
+    elements.dossierStatus.className = "status";
+    updateReviewButtonState();
+    return;
+  }
+
+  const lowerName = file.name.toLowerCase();
+  if (!lowerName.endsWith(".docx") && !lowerName.endsWith(".txt") && !lowerName.endsWith(".pdf")) {
+    selectedDossier = null;
+    clearDossierCandidates();
+    elements.dossierStatus.textContent = "Ungültige Datei: Bitte ein Dossier als DOCX, TXT oder PDF laden.";
+    elements.dossierStatus.className = "status error";
+    setStatus("Das Prüfungsdossier muss als DOCX, TXT oder PDF vorliegen.", "error");
+    updateReviewButtonState();
+    return;
+  }
+
+  selectedDossier = file;
+  clearDossierCandidates();
+  const sizeKb = (file.size / 1024).toFixed(1);
+  elements.dossierStatus.textContent =
+    `Prüfungsdossier geladen: ${file.name} (${sizeKb} KB). Thema und Aufgabenstellung können automatisch erkannt werden.`;
+  elements.dossierStatus.className = "status ok";
+  if (selectedFile) {
+    dossierConfirmationRequired = true;
+  }
+  updateReviewButtonState();
+  maybeAutoDetectDossierContext();
+}
+
+async function maybeAutoDetectDossierContext() {
+  if (!selectedFile || !selectedDossier) {
+    return;
+  }
+  await detectDossierContext(true);
+}
+
+async function detectDossierContext(silent = false) {
+  if (!selectedFile) {
+    setStatus("Für die Themen-Erkennung muss zuerst der Aufsatz geladen werden.", "error");
+    return;
+  }
+  if (!selectedDossier) {
+    setStatus("Für die Themen-Erkennung fehlt das Prüfungsdossier.", "error");
+    return;
+  }
+
+  if (!silent) {
+    setStatus("Prüfungsdossier wird mit dem Aufsatz abgeglichen ...", "");
+  }
+
+  try {
+    const documentBase64 = await readFileAsBase64(selectedFile);
+    const dossierBase64 = await readFileAsBase64(selectedDossier);
+    const response = await fetch("/api/dossier-detect", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: selectedFile.name,
+        document_base64: documentBase64,
+        dossier_name: selectedDossier.name,
+        dossier_base64: dossierBase64,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Das Prüfungsdossier konnte nicht ausgewertet werden.");
+    }
+
+    applyDetectedContext(payload.dossier_context || {});
+    if (!silent) {
+      setStatus("Themenliste aus dem Prüfungsdossier wurde erzeugt. Bitte das passende Thema bestätigen.", "ok");
+    }
+  } catch (error) {
+    if (!silent) {
+      setStatus(error.message, "error");
+    } else {
+      elements.dossierStatus.textContent = `Prüfungsdossier geladen, aber noch nicht automatisch erkannt: ${error.message}`;
+      elements.dossierStatus.className = "status error";
+    }
+  }
+}
+
+function applyDetectedContext(context) {
+  dossierCandidates = Array.isArray(context.candidates) ? context.candidates : [];
+  if (!dossierCandidates.length && (context.topic || context.assignment_text)) {
+    dossierCandidates = [
+      {
+        topic: context.topic || "Erkanntes Thema",
+        assignment_text: context.assignment_text || "",
+        document_type: context.document_type || "auto",
+        document_type_label: context.document_type_label || "",
+        match_score: context.match_score || 1,
+        match_label: context.match_label || "Erkannt",
+      },
+    ];
+  }
+  confirmedDossierIndex = -1;
+  dossierConfirmationRequired = dossierCandidates.length > 0;
+  renderDossierCandidates();
+  if (context.match_label) {
+    elements.dossierStatus.textContent = context.match_label;
+    elements.dossierStatus.className = "status ok";
+  }
+  updateReviewButtonState();
+}
+
+function renderDossierCandidates() {
+  if (!dossierCandidates.length) {
+    elements.dossierCandidateSection.classList.add("hidden");
+    elements.dossierCandidateList.innerHTML = "";
+    elements.dossierConfirmStatus.textContent = "Noch kein Thema bestätigt.";
+    return;
+  }
+
+  elements.dossierCandidateSection.classList.remove("hidden");
+  elements.dossierCandidateList.innerHTML = dossierCandidates
+    .map((candidate, index) => {
+      const checked = index === 0 ? "checked" : "";
+      const title = candidate.topic || `Thema ${index + 1}`;
+      const assignment = truncateText(candidate.assignment_text || "Keine Aufgabenstellung erkannt.", 260);
+      const typeLabel = candidate.document_type_label || candidate.document_type || "Automatisch";
+      const score = Number(candidate.match_score || 0);
+      return `
+        <label class="candidate-option">
+          <span class="candidate-row">
+            <input type="radio" name="dossierCandidate" value="${index}" ${checked} />
+            <span>
+              <span class="candidate-head">
+                <strong class="candidate-title">${escapeHtml(title)}</strong>
+                <span class="candidate-meta">${escapeHtml(typeLabel)}</span>
+                <span class="candidate-meta">Treffer ${escapeHtml(score.toString())}</span>
+              </span>
+              <p class="candidate-text"><strong>Aufgabe:</strong> ${formatText(assignment)}</p>
+            </span>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+  elements.dossierConfirmStatus.textContent = "Noch kein Thema bestätigt.";
+}
+
+function confirmSelectedDossierCandidate() {
+  if (!dossierCandidates.length) {
+    setStatus("Es liegt noch keine Themenliste aus dem Prüfungsdossier vor.", "error");
+    return;
+  }
+
+  const selectedOption = document.querySelector('input[name="dossierCandidate"]:checked');
+  const index = Number(selectedOption?.value ?? 0);
+  const candidate = dossierCandidates[index];
+  if (!candidate) {
+    setStatus("Bitte zuerst ein Thema aus der Liste wählen.", "error");
+    return;
+  }
+
+  confirmedDossierIndex = index;
+  dossierConfirmationRequired = false;
+  applyConfirmedCandidate(candidate);
+  elements.dossierConfirmStatus.textContent = `Bestätigt: ${candidate.topic}`;
+  elements.dossierStatus.textContent = `Bestätigtes Thema aus dem Prüfungsdossier: ${candidate.topic}`;
+  elements.dossierStatus.className = "status ok";
+  updateReviewButtonState();
+  setStatus("Thema aus dem Prüfungsdossier bestätigt. Die Korrektur kann jetzt starten.", "ok");
+}
+
+function applyConfirmedCandidate(candidate) {
+  if (candidate.document_type && candidate.document_type !== "auto" && elements.documentType.value === "auto") {
+    elements.documentType.value = candidate.document_type;
+    syncFormGuide();
+  }
+  if (candidate.topic) {
+    elements.topicInput.value = candidate.topic;
+  }
+  if (candidate.assignment_text) {
+    if (!assignmentVisible) {
+      toggleAssignment();
+    }
+    elements.assignmentInput.value = candidate.assignment_text;
+  }
+}
+
+function clearDossierCandidates() {
+  dossierCandidates = [];
+  confirmedDossierIndex = -1;
+  dossierConfirmationRequired = false;
+  elements.dossierCandidateSection.classList.add("hidden");
+  elements.dossierCandidateList.innerHTML = "";
+  elements.dossierConfirmStatus.textContent = "Noch kein Thema bestätigt.";
+}
+
+function updateReviewButtonState() {
+  elements.reviewButton.disabled = !selectedFile || dossierConfirmationRequired;
+}
+
+function resetFormState() {
+  currentResult = null;
+  assignmentVisible = false;
+  selectedFile = null;
+  selectedDossier = null;
+  clearDossierCandidates();
+
+  elements.docxFile.value = "";
+  elements.dossierFile.value = "";
+  elements.documentType.value = "auto";
+  elements.topicInput.value = "";
+  elements.thesisInput.value = "";
+  elements.assignmentInput.value = "";
+  elements.assignmentWrap.classList.add("hidden");
+  elements.assignmentToggle.textContent = "Aufgabenstellung eingeben";
+  elements.gymLevel.value = "1";
+  elements.model.value = "";
+  elements.fileStatus.textContent = "Noch keine Datei geladen.";
+  elements.fileStatus.className = "status";
+  elements.dossierStatus.textContent = "Noch kein Prüfungsdossier geladen.";
+  elements.dossierStatus.className = "status";
+  elements.resultPanel.classList.add("hidden");
+  elements.healthBox.innerHTML = "";
+  setStatus("Alle Eingaben wurden zurückgesetzt.", "ok");
+  syncFormGuide();
+  updateReviewButtonState();
+}
+
+function restorePendingFile() {
+  const raw = sessionStorage.getItem(PENDING_FILE_KEY);
+  if (!raw) {
+    return;
+  }
+  sessionStorage.removeItem(PENDING_FILE_KEY);
+
+  try {
+    const payload = JSON.parse(raw);
+    const bytes = base64ToUint8Array(payload.base64);
+    const file = new File([bytes], payload.name || "aufsatz.docx", {
+      type: payload.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    setSelectedFile(file);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") === "1") {
+      setStatus("Demo-Dokument geladen. Du kannst den Ablauf sofort testen.", "ok");
+    }
+  } catch (error) {
+    setSelectedFile(null);
+    setStatus("Die vorbereitete Datei konnte nicht übernommen werden.", "error");
+  }
+}
+
+function applyExampleAssignment() {
+  const guide = FORM_GUIDES[elements.documentType.value] || FORM_GUIDES.auto;
+  if (!assignmentVisible) {
+    toggleAssignment();
+  }
+  elements.assignmentInput.value = guide.example.replace(/^Beispiel:\s*/i, "");
+  if (!elements.topicInput.value.trim()) {
+    elements.topicInput.placeholder = guide.topicPlaceholder;
+  }
+}
+
+function syncFormGuide() {
+  const guide = FORM_GUIDES[elements.documentType.value] || FORM_GUIDES.auto;
+  elements.formGuideText.textContent = guide.guide;
+  elements.exampleAssignmentText.textContent = guide.example;
+  elements.topicInput.placeholder = guide.topicPlaceholder;
+  elements.thesisLabel.textContent = `${guide.thesisLabel} (optional)`;
+  elements.thesisInput.placeholder = guide.thesisPlaceholder;
+  syncQuickFormButtons();
+}
+
+function setDocumentTypeFromQuickButton(value) {
+  elements.documentType.value = value;
+  syncFormGuide();
+}
+
+function syncQuickFormButtons() {
+  elements.formQuickButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.form === elements.documentType.value);
+  });
+}
+
+function downloadReview() {
+  if (!currentResult) {
+    return;
+  }
+  const blob = base64ToBlob(
+    currentResult.reviewed_document_base64,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  );
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = currentResult.download_name || "korrigiert.docx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 500);
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function base64ToBlob(base64, mimeType) {
+  return new Blob([base64ToUint8Array(base64)], { type: mimeType });
+}
+
+function base64ToUint8Array(base64) {
+  const bytes = atob(base64);
+  const buffer = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) {
+    buffer[index] = bytes.charCodeAt(index);
+  }
+  return buffer;
+}
+
+function setStatus(message, variant) {
+  elements.statusBox.innerHTML = formatStatusMarkup(message);
+  elements.statusBox.className = variant ? `status ${variant}` : "status";
+}
+
+function setHealth(message, variant) {
+  elements.healthBox.innerHTML = formatStatusMarkup(message);
+  elements.healthBox.className = variant ? `health ${variant}` : "health";
+}
+
+function formatStatusMarkup(message) {
+  return escapeHtml(message)
+    .replaceAll("\n\n", "<br /><br />")
+    .replaceAll("\n", "<br />");
+}
+
+function buildLmStudioHelp(message) {
+  const normalized = String(message || "").trim();
+  const lower = normalized.toLowerCase();
+  if (lower.includes("connection refused") || lower.includes("could not connect") || lower.includes("nicht erreichbar")) {
+    return [
+      `LM Studio antwortet nicht auf http://127.0.0.1:1234/v1.`,
+      `So behebst du das:`,
+      `1. LM Studio öffnen.`,
+      `2. Ein Modell laden oder herunterladen.`,
+      `3. In LM Studio den lokalen Server auf Port 1234 starten.`,
+      `4. Danach hier erneut auf "Lokales LM Studio prüfen" klicken.`,
+      `Technische Meldung: ${normalized}`,
+    ].join("\n");
+  }
+  if (lower.includes("keine geladenen modelle")) {
+    return [
+      `LM Studio läuft, aber es ist noch kein Modell geladen.`,
+      `So behebst du das:`,
+      `1. In LM Studio ein passendes lokales Modell laden.`,
+      `2. Den lokalen Server aktiv lassen.`,
+      `3. Danach die Prüfung erneut starten.`,
+      `Technische Meldung: ${normalized}`,
+    ].join("\n");
+  }
+  return normalized;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatText(value) {
+  return escapeHtml(value).replaceAll("\n", "<br />");
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
