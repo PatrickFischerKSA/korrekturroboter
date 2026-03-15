@@ -8,6 +8,9 @@ from urllib import error, request
 
 LM_STUDIO_BASE_URL = os.environ.get("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "").strip()
+DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx"
+MAX_REVIEW_TEXT_CHARS = 9000
+MAX_DOSSIER_SCAN_PARAGRAPHS = 120
 
 
 ESSAY_GUIDELINES = {
@@ -249,14 +252,16 @@ def calculate_orthography_grade(level: str, error_count: int, word_count: int) -
 def detect_document_type(text: str, requested_type: str, assignment_text: str = "", topic: str = "") -> str:
     if requested_type in FORM_LABELS:
         return requested_type
-    lowered = f"{assignment_text}\n{topic}\n{text}".lower()
-    speech_hits = sum(lowered.count(token) for token in ["publikum", "wir", "rede", "appell", "zuhörer", "meine damen"])
+    lowered_assignment = f"{assignment_text}\n{topic}".lower()
+    lowered_text = text.lower()
+    speech_hits = sum(lowered_assignment.count(token) for token in ["rede", "publikum", "zuhörer", "meine damen", "ansprache", "redepublikum"])
+    speech_hits += sum(lowered_text.count(token) for token in ["publikum", "zuhörer", "meine damen"])
     dialectical_hits = sum(
-        lowered.count(token)
+        lowered_assignment.count(token)
         for token in ["vor- und nachteile", "vor und nachteile", "nehmen sie stellung", "pro und contra", "fluch und segen"]
     )
-    linear_hits = sum(lowered.count(token) for token in ["warum", "was macht", "gute gründe", "gute gruende", "weshalb"])
-    if speech_hits >= 4:
+    linear_hits = sum(lowered_assignment.count(token) for token in ["warum", "was macht", "gute gründe", "gute gruende", "weshalb"])
+    if speech_hits >= 2:
         return "speech"
     if dialectical_hits >= 1:
         return "dialectical_discussion"
@@ -267,13 +272,35 @@ def detect_document_type(text: str, requested_type: str, assignment_text: str = 
 
 def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: list[str]) -> dict[str, Any]:
     essay_text = "\n".join(essay_paragraphs).strip()
-    dossier_text = "\n".join(dossier_paragraphs).strip()
+    dossier_scan = dossier_paragraphs[:MAX_DOSSIER_SCAN_PARAGRAPHS]
+    dossier_text = "\n".join(dossier_scan).strip()
+    warnings = build_input_warnings(essay_paragraphs, dossier_paragraphs=dossier_paragraphs)
     if not essay_text or not dossier_text:
-        return {"topic": "", "assignment_text": "", "document_type": "auto", "match_label": "", "candidates": []}
+        return {
+            "topic": "",
+            "assignment_text": "",
+            "document_type": "auto",
+            "match_label": "",
+            "candidates": [],
+            "warnings": warnings,
+            "pipeline": {},
+        }
 
-    candidates = _build_dossier_candidates(dossier_paragraphs)
+    candidates = _build_dossier_candidates(dossier_scan)
     if not candidates:
-        return {"topic": "", "assignment_text": "", "document_type": "auto", "match_label": "", "candidates": []}
+        return {
+            "topic": "",
+            "assignment_text": "",
+            "document_type": "auto",
+            "match_label": "",
+            "candidates": [],
+            "warnings": warnings,
+            "pipeline": {
+                "mode": "two_stage_local",
+                "stage_1": "Keine tragfähigen Themenblöcke im Dossier gefunden.",
+                "stage_2": "Abgleich mit dem Aufsatz konnte nicht starten.",
+            },
+        }
 
     scored = []
     for candidate in candidates:
@@ -282,7 +309,19 @@ def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: 
     scored.sort(key=lambda item: item[0], reverse=True)
     best_score, best = scored[0]
     if best_score <= 0:
-        return {"topic": "", "assignment_text": "", "document_type": "auto", "match_label": "", "candidates": []}
+        return {
+            "topic": "",
+            "assignment_text": "",
+            "document_type": "auto",
+            "match_label": "",
+            "candidates": [],
+            "warnings": warnings,
+            "pipeline": {
+                "mode": "two_stage_local",
+                "stage_1": f"{len(candidates)} Themenblöcke aus dem Dossier extrahiert.",
+                "stage_2": "Kein Themenblock passt ausreichend zum hochgeladenen Aufsatz.",
+            },
+        }
 
     normalized_candidates = []
     for score, candidate in scored[:6]:
@@ -311,6 +350,12 @@ def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: 
         "document_type": document_type,
         "match_label": f"Thema aus Prüfungsdossier erkannt (Trefferwert {best_score}).",
         "candidates": normalized_candidates,
+        "warnings": warnings,
+        "pipeline": {
+            "mode": "two_stage_local",
+            "stage_1": f"{len(candidates)} Themenblöcke aus dem Prüfungsdossier extrahiert.",
+            "stage_2": f"Bester Themenblock mit Trefferwert {best_score} zum Aufsatz abgeglichen.",
+        },
     }
 
 
@@ -415,6 +460,49 @@ def _dedupe_candidates(candidates: list[dict[str, str]]) -> list[dict[str, str]]
     return unique
 
 
+def _shorten_context_text(text: str, max_chars: int) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return f"{cleaned[: max_chars - 1].rstrip()}…"
+
+
+def build_input_warnings(
+    essay_paragraphs: list[str],
+    dossier_paragraphs: list[str] | None = None,
+    assignment_text: str = "",
+    topic: str = "",
+    thesis: str = "",
+) -> list[str]:
+    warnings: list[str] = []
+    essay_text = "\n\n".join(essay_paragraphs).strip()
+    dossier_text = "\n\n".join(dossier_paragraphs or []).strip()
+
+    if len(essay_text) > MAX_REVIEW_TEXT_CHARS:
+        warnings.append(
+            "Der Aufsatz ist sehr lang. Für die KI-Bewertung wird bei lokalen Modellen ein gekürzter Analyseauszug verwendet, "
+            "damit der Lauf stabil bleibt."
+        )
+    if dossier_paragraphs and len(dossier_paragraphs) > MAX_DOSSIER_SCAN_PARAGRAPHS:
+        warnings.append(
+            f"Das Prüfungsdossier ist umfangreich. Die Dossieranalyse nutzt deshalb nur die ersten {MAX_DOSSIER_SCAN_PARAGRAPHS} Absätze "
+            "für die automatische Themenwahl."
+        )
+    combined_tokens = estimate_tokens(essay_text) + estimate_tokens(dossier_text) + estimate_tokens(assignment_text) + estimate_tokens(topic) + estimate_tokens(thesis)
+    if combined_tokens > 3500:
+        warnings.append(
+            "Die Gesamteingabe ist für kleinere lokale Modelle sehr umfangreich. Ein Modell mit größerem Kontextfenster bleibt hier robuster."
+        )
+    return warnings
+
+
+def estimate_tokens(text: str) -> int:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not cleaned:
+        return 0
+    return max(1, len(cleaned) // 4)
+
+
 def _looks_like_assignment(text: str) -> bool:
     lowered = text.lower()
     cues = [
@@ -471,6 +559,9 @@ def fetch_model(base_url: str) -> str:
     models = list_models(base_url)
     if not models:
         raise ReviewError("LM Studio liefert keine Modelle. Bitte in LM Studio ein Modell laden.")
+    preferred = next((entry["id"] for entry in models if entry.get("id") == DEFAULT_MODEL_ID), "")
+    if preferred:
+        return preferred
     return models[0]["id"]
 
 
@@ -486,73 +577,41 @@ def build_prompt(
     rubric = FORM_GUIDELINES[document_type]
     type_label = FORM_LABELS[document_type]
     structure_notes = DISCUSSION_STRUCTURE_NOTES.get(document_type, [])
-
-    system_prompt = (
-        "Du bist ein streng genauer, aber lernförderlicher Korrekturroboter für deutschsprachige "
-        "Maturaufsatztexte. Du antwortest ausschließlich mit validem JSON. Die Kommentare müssen "
-        "in einwandfreiem Deutsch, als volle Sätze und ohne Stichworte formuliert sein. "
-        "Wenn es sich um eine lineare oder dialektische Erörterung handelt, musst du die "
-        "spezifische Form konsequent anwenden."
-    )
-
-    user_payload = {
-        "auftrag": (
-            "Bewerte den hochgeladenen Text nach den ersten drei Kriterien mit sehr ausführlichen, "
-            "konstruktiven und lernförderlichen Kommentaren. Markiere konkrete Textstellen mit "
-            "präzisen Überarbeitungshinweisen. Zähle für das vierte Kriterium ausschließlich "
-            "Grammatik- und Rechtschreibfehler; Zeichensetzungsfehler werden nicht mitgezählt. "
-            "Prüfe den Text konsequent daran, ob er die angegebene Leitfrage oder These einlöst. "
-            "Falls keine Leitfrage angegeben ist, arbeite stattdessen streng mit der Aufgabenstellung und dem Thema."
-        ),
-        "dokumenttyp": type_label,
-        "thema": topic or "nicht vorgegeben",
-        "leitfrage_oder_these": thesis or "nicht zusätzlich angegeben",
-        "aufgabenstellung": assignment_text or "nicht zusätzlich angegeben",
-        "gym_stufe_für_sprache": gym_level,
-        "bewertungskriterien_1_bis_3": rubric,
-        "argumentationslehre_gradmesser": ARGUMENTATION_MEASURE,
-        "rhetorische_formen_gradmesser": RHETORICAL_FORMS,
-        "formspezifische_hinweise": structure_notes,
-        "absatzanzahl": paragraph_count,
-        "ausgabeformat": {
-            "document_type": "essay|speech|linear_discussion|dialectical_discussion",
-            "summary": "2-4 Sätze",
-            "criteria_comments": {
-                "inhalt": {"score": "1.0-6.0", "comment": "ganzer Absatz"},
-                "aufbau": {"score": "1.0-6.0", "comment": "ganzer Absatz"},
-                "ausdruck": {"score": "1.0-6.0", "comment": "ganzer Absatz"},
-            },
-            "annotations": [
-                {
-                    "paragraph_index": 0,
-                    "snippet": "exakte Textstelle",
-                    "category": "inhalt|aufbau|ausdruck|rhetorik",
-                    "action": "kommentieren|ueberarbeiten",
-                    "comment": "ganzer Satz",
-                    "suggestion": "präziser Verbesserungsvorschlag in ganzen Sätzen",
-                }
-            ],
-            "language_errors": [
-                {
-                    "paragraph_index": 0,
-                    "snippet": "exakte fehlerhafte Formulierung",
-                    "category": "grammatik|rechtschreibung",
-                    "comment": "kurze Erklärung in vollem Satz",
-                    "suggestion": "korrekte Form",
-                }
-            ],
-        },
-        "regeln": [
-            "Gib maximal 18 annotations für Inhalt, Aufbau, Ausdruck und Rhetorik aus.",
-            "Gib maximal 80 language_errors aus.",
-            "Jede annotation und jeder language_error muss mit einem im Text wirklich vorhandenen snippet arbeiten.",
-            "Jede criteria_comment muss sehr ausführlich, konstruktiv und lernförderlich sein.",
-            "Die Kommentare dürfen keine Aufzählungen enthalten.",
-        ],
-        "text": text,
+    assignment_text = _shorten_context_text(assignment_text, 500)
+    topic = _shorten_context_text(topic, 180)
+    thesis = _shorten_context_text(thesis, 220)
+    text = _shorten_context_text(text, 9000)
+    rubric_lines = {
+        key: "; ".join(values[:5])
+        for key, values in rubric.items()
     }
 
-    return system_prompt, json.dumps(user_payload, ensure_ascii=False)
+    system_prompt = (
+        "Du bist ein genauer, lernförderlicher Korrekturassistent für deutschsprachige Maturaufsätze. "
+        "Antworte nur mit gültigem JSON. Schreibe vollständige deutsche Sätze ohne Stichworte."
+    )
+    user_prompt = "\n".join(
+        [
+            f"Dokumenttyp: {type_label}",
+            f"Thema: {topic or 'nicht vorgegeben'}",
+            f"Leitfrage/These: {thesis or 'nicht vorgegeben'}",
+            f"Aufgabenstellung: {assignment_text or 'nicht vorgegeben'}",
+            f"Gym-Stufe: {gym_level}",
+            f"Absätze: {paragraph_count}",
+            f"Kriterium Inhalt: {rubric_lines['inhalt']}",
+            f"Kriterium Aufbau: {rubric_lines['aufbau']}",
+            f"Kriterium Ausdruck: {rubric_lines['ausdruck']}",
+            f"Formhinweise: {'; '.join(structure_notes[:3]) if structure_notes else 'keine'}",
+            "Zähle für Kriterium 4 nur Grammatik- und Rechtschreibfehler, keine Zeichensetzung.",
+            "Gib genau dieses JSON zurück:",
+            '{"document_type":"essay|speech|linear_discussion|dialectical_discussion","summary":"2-4 Sätze","criteria_comments":{"inhalt":{"score":4.5,"comment":"..."}, "aufbau":{"score":4.5,"comment":"..."}, "ausdruck":{"score":4.5,"comment":"..."}},"annotations":[{"paragraph_index":0,"snippet":"...","category":"inhalt|aufbau|ausdruck|rhetorik","action":"kommentieren|ueberarbeiten","comment":"...","suggestion":"..."}],"language_errors":[{"paragraph_index":0,"snippet":"...","category":"grammatik|rechtschreibung","comment":"...","suggestion":"..."}]}',
+            "Maximal 8 annotations und maximal 35 language_errors.",
+            "Text:",
+            text,
+        ]
+    )
+
+    return system_prompt, user_prompt
 
 
 def parse_json_response(raw: str) -> dict[str, Any]:
@@ -695,6 +754,12 @@ def run_review(
     full_text = "\n\n".join(paragraphs).strip()
     if not full_text:
         raise ReviewError("Das Word-Dokument enthält keinen auswertbaren Text.")
+    review_warnings = build_input_warnings(
+        paragraphs,
+        assignment_text=assignment_text,
+        topic=topic,
+        thesis=thesis,
+    )
 
     base_url = (base_url or LM_STUDIO_BASE_URL).rstrip("/")
     model_name = model_name or fetch_model(base_url)
@@ -708,6 +773,12 @@ def run_review(
         topic=topic,
         thesis=thesis,
     )
+    prompt_tokens = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
+    if prompt_tokens > 3000:
+        raise ReviewError(
+            "Der Aufsatz plus Prüfungsdossier ist für das aktuell geladene Modell mit kleinem Kontext zu umfangreich. "
+            "Lade in LM Studio ein Modell mit größerem Kontext oder kürze das Dossier deutlich."
+        )
 
     payload = _http_post_json(
         f"{base_url}/chat/completions",
@@ -733,6 +804,7 @@ def run_review(
     )
     normalized["model"] = model_name
     normalized["base_url"] = base_url
+    normalized["warnings"] = review_warnings
     return normalized
 
 
@@ -771,7 +843,23 @@ def _read_http_error(exc: error.HTTPError) -> str:
     if isinstance(payload, dict):
         inner = payload.get("error")
         if isinstance(inner, dict) and inner.get("message"):
-            return str(inner["message"])
+            return _normalize_lm_error(str(inner["message"]))
         if isinstance(inner, str):
-            return inner
-    return f"LM Studio antwortete mit HTTP {exc.code}."
+            return _normalize_lm_error(inner)
+    return _normalize_lm_error(f"LM Studio antwortete mit HTTP {exc.code}.")
+
+
+def _normalize_lm_error(message: str) -> str:
+    normalized = str(message or "").strip()
+    lowered = normalized.lower()
+    if "tokens to keep" in lowered or "context length" in lowered:
+        return (
+            "Das geladene LM-Studio-Modell hat zu wenig Kontext für diesen Auftrag. "
+            "Bitte lade ein Modell mit größerem Kontextfenster oder kürze den eingegebenen Text."
+        )
+    if "response_format.type" in lowered:
+        return (
+            "LM Studio hat den Antwortmodus abgelehnt. Bitte den Korrekturroboter neu starten, "
+            "damit die aktuelle Serverversion verwendet wird."
+        )
+    return normalized
