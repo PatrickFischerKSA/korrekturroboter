@@ -298,13 +298,14 @@ button:disabled {
 
 .candidate-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .candidate-option {
   display: grid;
-  gap: 8px;
-  padding: 14px 16px;
+  gap: 6px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: #fffdfa;
@@ -326,14 +327,35 @@ button:disabled {
 .candidate-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+}
+
+.candidate-controls {
+  margin: 4px 0 4px;
+}
+
+.candidate-form-field {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+}
+
+.candidate-form-field span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.candidate-form-select {
+  min-height: 44px;
+  padding: 10px 12px;
 }
 
 .candidate-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.98rem;
   color: var(--ink);
+  line-height: 1.25;
 }
 
 .candidate-meta {
@@ -347,10 +369,17 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.candidate-meta-accent {
+  background: rgba(13, 122, 103, 0.14);
+  color: var(--accent-strong);
+  border: 1px solid rgba(13, 122, 103, 0.2);
+}
+
 .candidate-text {
   margin: 0;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.45;
+  font-size: 0.96rem;
 }
 
 .start-grid {
@@ -531,7 +560,8 @@ button:disabled {
   .grid,
   .criteria-grid,
   .start-grid,
-  .section-signal-grid {
+  .section-signal-grid,
+  .candidate-list {
     grid-template-columns: 1fr;
   }
 

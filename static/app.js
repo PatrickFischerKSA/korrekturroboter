@@ -8,6 +8,7 @@ const elements = {
   dossierCandidateSection: document.getElementById("dossierCandidateSection"),
   dossierCandidateList: document.getElementById("dossierCandidateList"),
   confirmDossierButton: document.getElementById("confirmDossierButton"),
+  resetDossierButton: document.getElementById("resetDossierButton"),
   dossierConfirmStatus: document.getElementById("dossierConfirmStatus"),
   documentType: document.getElementById("documentType"),
   formQuickButtons: Array.from(document.querySelectorAll(".quick-form-button")),
@@ -46,6 +47,7 @@ let selectedFile = null;
 let selectedDossier = null;
 let dossierCandidates = [];
 let confirmedDossierIndex = -1;
+let activeDossierCandidateIndex = 0;
 let dossierConfirmationRequired = false;
 const PENDING_FILE_KEY = "korrekturroboter_pending_file";
 const DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx";
@@ -116,6 +118,7 @@ elements.assignmentToggle.addEventListener("click", toggleAssignment);
 elements.exampleAssignmentButton.addEventListener("click", applyExampleAssignment);
 elements.dossierDetectButton.addEventListener("click", detectDossierContext);
 elements.confirmDossierButton.addEventListener("click", confirmSelectedDossierCandidate);
+elements.resetDossierButton.addEventListener("click", resetDossierSelection);
 elements.documentType.addEventListener("change", syncFormGuide);
 elements.schoolMode.addEventListener("change", syncSchoolModeState);
 elements.formQuickButtons.forEach((button) => {
@@ -129,6 +132,7 @@ elements.uploadBox.addEventListener("drop", handleDrop);
 elements.dossierUploadBox.addEventListener("dragover", handleDossierDragOver);
 elements.dossierUploadBox.addEventListener("dragleave", handleDossierDragLeave);
 elements.dossierUploadBox.addEventListener("drop", handleDossierDrop);
+elements.dossierCandidateList.addEventListener("change", handleDossierCandidateListChange);
 
 syncFormGuide();
 elements.model.value = DEFAULT_MODEL_ID;
@@ -508,6 +512,11 @@ function applyDetectedContext(context) {
       },
     ];
   }
+  dossierCandidates = dossierCandidates.map((candidate) => ({
+    ...candidate,
+    selected_document_type: candidate.selected_document_type || candidate.document_type || "auto",
+  }));
+  activeDossierCandidateIndex = 0;
   confirmedDossierIndex = -1;
   dossierConfirmationRequired = dossierCandidates.length > 0;
   renderDossierCandidates();
@@ -549,10 +558,12 @@ function renderDossierCandidates() {
   elements.dossierCandidateSection.classList.remove("hidden");
   elements.dossierCandidateList.innerHTML = dossierCandidates
     .map((candidate, index) => {
-      const checked = index === 0 ? "checked" : "";
+      const checked = index === activeDossierCandidateIndex ? "checked" : "";
       const title = candidate.topic || `Thema ${index + 1}`;
-      const assignment = truncateText(candidate.assignment_text || "Keine Aufgabenstellung erkannt.", 260);
-      const typeLabel = candidate.document_type_label || candidate.document_type || "Automatisch";
+      const assignment = truncateText(candidate.assignment_text || "Keine Aufgabenstellung erkannt.", 180);
+      const typeLabel = getDocumentTypeLabel(candidate.document_type || "auto");
+      const selectedType = candidate.selected_document_type || candidate.document_type || "auto";
+      const manualChanged = selectedType !== (candidate.document_type || "auto");
       const score = Number(candidate.match_score || 0);
       return `
         <label class="candidate-option">
@@ -561,9 +572,18 @@ function renderDossierCandidates() {
             <span>
               <span class="candidate-head">
                 <strong class="candidate-title">${escapeHtml(title)}</strong>
-                <span class="candidate-meta">${escapeHtml(typeLabel)}</span>
+                <span class="candidate-meta">Erkannt: ${escapeHtml(typeLabel)}</span>
+                ${manualChanged ? `<span class="candidate-meta candidate-meta-accent">Manuell: ${escapeHtml(getDocumentTypeLabel(selectedType))}</span>` : ""}
                 <span class="candidate-meta">Treffer ${escapeHtml(score.toString())}</span>
               </span>
+              <div class="candidate-controls">
+                <label class="candidate-form-field">
+                  <span>Textform ändern</span>
+                  <select class="candidate-form-select" data-index="${index}">
+                    ${buildCandidateFormOptions(selectedType)}
+                  </select>
+                </label>
+              </div>
               <p class="candidate-text"><strong>Aufgabe:</strong> ${formatText(assignment)}</p>
             </span>
           </span>
@@ -581,17 +601,20 @@ function confirmSelectedDossierCandidate() {
   }
 
   const selectedOption = document.querySelector('input[name="dossierCandidate"]:checked');
-  const index = Number(selectedOption?.value ?? 0);
+  const index = Number(selectedOption?.value ?? activeDossierCandidateIndex);
   const candidate = dossierCandidates[index];
   if (!candidate) {
     setStatus("Bitte zuerst ein Thema aus der Liste wählen.", "error");
     return;
   }
 
+  activeDossierCandidateIndex = index;
   confirmedDossierIndex = index;
   dossierConfirmationRequired = false;
   applyConfirmedCandidate(candidate);
-  elements.dossierConfirmStatus.textContent = `Bestätigt: ${candidate.topic}`;
+  const selectedType = candidate.selected_document_type || candidate.document_type || "auto";
+  const confirmSuffix = selectedType !== (candidate.document_type || "auto") ? " - Form manuell angepasst" : "";
+  elements.dossierConfirmStatus.textContent = `Bestätigt: ${candidate.topic} (${getDocumentTypeLabel(selectedType)})${confirmSuffix}`;
   elements.dossierStatus.textContent = `Bestätigtes Thema aus dem Prüfungsdossier: ${candidate.topic}`;
   elements.dossierStatus.className = "status ok";
   updateReviewButtonState();
@@ -599,10 +622,9 @@ function confirmSelectedDossierCandidate() {
 }
 
 function applyConfirmedCandidate(candidate) {
-  if (candidate.document_type && candidate.document_type !== "auto" && elements.documentType.value === "auto") {
-    elements.documentType.value = candidate.document_type;
-    syncFormGuide();
-  }
+  const selectedType = candidate.selected_document_type || candidate.document_type || "auto";
+  elements.documentType.value = selectedType;
+  syncFormGuide();
   if (candidate.topic) {
     elements.topicInput.value = candidate.topic;
   }
@@ -614,8 +636,57 @@ function applyConfirmedCandidate(candidate) {
   }
 }
 
+function handleDossierCandidateListChange(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  if (target instanceof HTMLInputElement && target.name === "dossierCandidate") {
+    const index = Number(target.value ?? -1);
+    const candidate = dossierCandidates[index];
+    if (candidate) {
+      activeDossierCandidateIndex = index;
+      elements.documentType.value = candidate.selected_document_type || candidate.document_type || "auto";
+      syncFormGuide();
+    }
+    return;
+  }
+  if (!(target instanceof HTMLSelectElement) || !target.classList.contains("candidate-form-select")) {
+    return;
+  }
+  const index = Number(target.dataset.index ?? -1);
+  if (!Number.isInteger(index) || index < 0 || index >= dossierCandidates.length) {
+    return;
+  }
+  dossierCandidates[index].selected_document_type = target.value;
+  activeDossierCandidateIndex = index;
+  renderDossierCandidates();
+  const selectedOption = document.querySelector('input[name="dossierCandidate"]:checked');
+  if (Number(selectedOption?.value ?? -1) === index) {
+    elements.documentType.value = target.value;
+    syncFormGuide();
+  }
+}
+
+function resetDossierSelection() {
+  selectedDossier = null;
+  activeDossierCandidateIndex = 0;
+  elements.dossierFile.value = "";
+  clearDossierCandidates();
+  elements.dossierStatus.textContent = "Noch kein Prüfungsdossier geladen.";
+  elements.dossierStatus.className = "status";
+  elements.topicInput.value = "";
+  elements.assignmentInput.value = "";
+  elements.documentType.value = "auto";
+  syncFormGuide();
+  clearWarnings();
+  updateReviewButtonState();
+  setStatus("Themenblock wurde zurückgesetzt. Du kannst jetzt ein neues Dossier laden oder die Form manuell festlegen.", "ok");
+}
+
 function clearDossierCandidates() {
   dossierCandidates = [];
+  activeDossierCandidateIndex = 0;
   confirmedDossierIndex = -1;
   dossierConfirmationRequired = false;
   elements.dossierCandidateSection.classList.add("hidden");
@@ -854,4 +925,32 @@ function truncateText(value, maxLength) {
 function capitalize(value) {
   const text = String(value || "");
   return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
+}
+
+function getDocumentTypeLabel(value) {
+  switch (value) {
+    case "essay":
+      return "Essay";
+    case "speech":
+      return "Rede";
+    case "linear_discussion":
+      return "Lineare Erörterung";
+    case "dialectical_discussion":
+      return "Dialektische Erörterung";
+    default:
+      return "Weitere Formen";
+  }
+}
+
+function buildCandidateFormOptions(selectedValue) {
+  const options = [
+    ["auto", "Weitere Formen"],
+    ["essay", "Essay"],
+    ["speech", "Rede"],
+    ["linear_discussion", "Lineare Erörterung"],
+    ["dialectical_discussion", "Dialektische Erörterung"],
+  ];
+  return options
+    .map(([value, label]) => `<option value="${value}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
 }
