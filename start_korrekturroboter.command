@@ -6,6 +6,27 @@ cd "$SCRIPT_DIR"
 PORT_FILE="$SCRIPT_DIR/.korrekturroboter.port"
 PID_FILE="$SCRIPT_DIR/.korrekturroboter.pid"
 LOG_FILE="$SCRIPT_DIR/.korrekturroboter.log"
+LT_PID_FILE="$SCRIPT_DIR/.languagetool.pid"
+LT_LOG_FILE="$SCRIPT_DIR/.languagetool.log"
+LT_HOME="$SCRIPT_DIR/vendor/languagetool/LanguageTool"
+LT_JAVA="$SCRIPT_DIR/.lt-java/lib/jvm/bin/java"
+
+start_languagetool_if_available() {
+  if [[ ! -x "$LT_JAVA" || ! -f "$LT_HOME/languagetool-server.jar" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$LT_PID_FILE" ]]; then
+    local old_lt_pid
+    old_lt_pid="$(cat "$LT_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$old_lt_pid" ]] && kill -0 "$old_lt_pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  nohup "$LT_JAVA" -jar "$LT_HOME/languagetool-server.jar" --port 8081 >"$LT_LOG_FILE" 2>&1 &
+  echo $! >"$LT_PID_FILE"
+}
 
 find_free_port() {
   python3 - <<'PY'
@@ -61,6 +82,7 @@ if [[ -f "$PORT_FILE" ]]; then
 fi
 
 stop_existing_server
+start_languagetool_if_available
 
 PORT="$(find_free_port)"
 if [[ -z "$PORT" ]]; then
