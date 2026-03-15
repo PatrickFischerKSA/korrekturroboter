@@ -62,7 +62,7 @@ let confirmedDossierIndex = -1;
 let activeDossierCandidateIndex = 0;
 let dossierConfirmationRequired = false;
 const PENDING_FILE_KEY = "korrekturroboter_pending_file";
-const DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx";
+const DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506";
 
 const FORM_GUIDES = {
   auto: {

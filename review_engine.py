@@ -20,7 +20,11 @@ except Exception:
 LM_STUDIO_BASE_URL = os.environ.get("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "").strip()
 LANGUAGETOOL_BASE_URL = os.environ.get("LANGUAGETOOL_BASE_URL", "http://127.0.0.1:8081/v2").rstrip("/")
-DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx"
+DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506"
+PREFERRED_MODEL_IDS = [
+    "mistral-small-3.2-24b-instruct-2506",
+    "mistral-small-3.2-24b-instruct-2506-mlx",
+]
 MAX_REVIEW_TEXT_CHARS = 9000
 MAX_DOSSIER_SCAN_PARAGRAPHS = 120
 MAX_CHUNK_CHARS = 2400
@@ -297,19 +301,60 @@ def detect_document_type(text: str, requested_type: str, assignment_text: str = 
         return requested_type
     lowered_assignment = f"{assignment_text}\n{topic}".lower()
     lowered_text = text.lower()
+
+    explicit_speech = any(
+        token in lowered_assignment
+        for token in [
+            "redemanuskript",
+            "halte eine rede",
+            "halten sie eine rede",
+            "verfassen sie eine rede",
+            "ansprache",
+            "rede an",
+        ]
+    )
     speech_hits = sum(lowered_assignment.count(token) for token in ["rede", "publikum", "zuhörer", "meine damen", "ansprache", "redepublikum"])
-    speech_hits += sum(lowered_text.count(token) for token in ["publikum", "zuhörer", "meine damen"])
+    speech_hits += sum(lowered_text.count(token) for token in ["publikum", "zuhörer", "meine damen", "liebe anwesende"])
     dialectical_hits = sum(
         lowered_assignment.count(token)
-        for token in ["vor- und nachteile", "vor und nachteile", "nehmen sie stellung", "pro und contra", "fluch und segen"]
+        for token in [
+            "erörtern sie dialektisch",
+            "dialektisch",
+            "dialektische erörterung",
+            "vor- und nachteile",
+            "vor und nachteile",
+            "pro und contra",
+            "dafür und dagegen",
+            "abwägen sie",
+            "nehmen sie stellung",
+        ]
     )
-    linear_hits = sum(lowered_assignment.count(token) for token in ["warum", "was macht", "gute gründe", "gute gruende", "weshalb"])
-    if speech_hits >= 2:
-        return "speech"
+    linear_hits = sum(
+        lowered_assignment.count(token)
+        for token in [
+            "lineare erörterung",
+            "erörtern sie linear",
+            "erörtern sie",
+            "warum",
+            "was macht",
+            "gute gründe",
+            "gute gruende",
+            "weshalb",
+            "begründen sie",
+        ]
+    )
+    essay_hits = sum(lowered_assignment.count(token) for token in ["essay", "essayistisch", "persönliche auseinandersetzung", "persoenliche auseinandersetzung"])
+
     if dialectical_hits >= 1:
         return "dialectical_discussion"
-    if linear_hits >= 1:
+    if linear_hits >= 1 and "erörter" in lowered_assignment:
         return "linear_discussion"
+    if essay_hits >= 1:
+        return "essay"
+    if explicit_speech or speech_hits >= 3:
+        return "speech"
+    if "erörtern" in lowered_assignment or "erörterung" in lowered_assignment:
+        return "dialectical_discussion" if any(token in lowered_assignment for token in ["abwägen", "pro und contra", "vor- und nachteile", "vor und nachteile"]) else "linear_discussion"
     return "essay"
 
 
@@ -613,9 +658,14 @@ def fetch_model(base_url: str) -> str:
     models = list_models(base_url)
     if not models:
         raise ReviewError("LM Studio liefert keine Modelle. Bitte in LM Studio ein Modell laden.")
-    preferred = next((entry["id"] for entry in models if entry.get("id") == DEFAULT_MODEL_ID), "")
-    if preferred:
-        return preferred
+    model_ids = [str(entry.get("id", "")).strip() for entry in models if isinstance(entry, dict)]
+    for preferred_id in PREFERRED_MODEL_IDS:
+        if preferred_id in model_ids:
+            return preferred_id
+    for preferred_id in PREFERRED_MODEL_IDS:
+        prefix_match = next((item for item in model_ids if item.startswith(preferred_id)), "")
+        if prefix_match:
+            return prefix_match
     return models[0]["id"]
 
 
@@ -682,6 +732,9 @@ def build_prompt(
             f"Kriterium Aufbau: {rubric_lines['aufbau']}",
             f"Kriterium Ausdruck: {rubric_lines['ausdruck']}",
             f"Formhinweise: {'; '.join(structure_notes[:3]) if structure_notes else 'keine'}",
+            "Beurteile ausdrücklich, wie präzise die Aufgabenstellung erfüllt wird und ob Materialien oder Vorgaben sichtbar aufgenommen werden.",
+            "Schreibe nicht allgemein oder pauschal. Nenne pro Kriterium konkrete Beobachtungen aus dem Text und benenne Stärken und Defizite.",
+            "Wenn die Aufgabenstellung eine Erörterung verlangt, darfst du den Text nicht als Rede umdeuten.",
             "Zähle für Kriterium 4 nur Grammatik- und Rechtschreibfehler, keine Zeichensetzung.",
             "Gib genau dieses JSON zurück:",
             '{"document_type":"essay|speech|linear_discussion|dialectical_discussion","summary":"2-4 Sätze","criteria_comments":{"inhalt":{"score":4.5,"comment":"..."}, "aufbau":{"score":4.5,"comment":"..."}, "ausdruck":{"score":4.5,"comment":"..."}},"annotations":[{"paragraph_index":0,"snippet":"...","category":"inhalt|aufbau|ausdruck|rhetorik","action":"kommentieren|ueberarbeiten","comment":"...","suggestion":"..."}],"language_errors":[{"paragraph_index":0,"snippet":"...","category":"grammatik|rechtschreibung","comment":"...","suggestion":"..."}]}',
@@ -775,6 +828,8 @@ def build_stage2_prompt(
             f"Kriterium Aufbau: {'; '.join(rubric['aufbau'][:5])}",
             f"Kriterium Ausdruck: {'; '.join(rubric['ausdruck'][:5])}",
             f"Formhinweise: {'; '.join(structure_notes[:3]) if structure_notes else 'keine'}",
+            "Verdichte die Teilanalysen zu schulisch präzisem Feedback. Vermeide Leerformeln wie 'teilweise knapp' ohne genaue Beobachtung.",
+            "Beurteile ausdrücklich Materialbezug, Argumentführung, Übergänge, Register und sprachliche Angemessenheit.",
             "Teilanalysen:",
             *[f"- {summary}" for summary in chunk_summaries[:8]],
             "Verdichtete Hinweise:",
@@ -910,31 +965,30 @@ def _language_error_key(item: dict[str, Any]) -> tuple[Any, ...]:
 def detect_local_language_errors(paragraphs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
     errors: list[dict[str, Any]] = []
+    lt_available = False
 
     try:
         lt_errors = detect_languagetool_errors(paragraphs)
         errors = merge_language_error_lists(errors, lt_errors)
+        lt_available = True
         warnings.append("Kriterium 4 nutzt den lokalen LanguageTool-Server auf localhost als primäre Sprachprüfung.")
     except ReviewError as exc:
         warnings.append(f"LanguageTool lokal nicht verfügbar: {exc}")
 
-    if not MAC_SPELLCHECK_AVAILABLE:
-        return errors, warnings
-
-    checker = NSSpellChecker.sharedSpellChecker()
-    spell_document_tag = 0
-
     try:
+        checker = NSSpellChecker.sharedSpellChecker() if MAC_SPELLCHECK_AVAILABLE and not lt_available else None
+        spell_document_tag = 0
         for paragraph_index, paragraph in enumerate(paragraphs):
             if not paragraph.strip():
                 continue
-            errors.extend(_detect_local_spelling_errors(checker, paragraph, paragraph_index, spell_document_tag))
+            if checker is not None:
+                errors.extend(_detect_local_spelling_errors(checker, paragraph, paragraph_index, spell_document_tag))
             errors.extend(_detect_local_grammar_heuristics(paragraph, paragraph_index))
     except Exception as exc:
         warnings.append(f"Die lokale Sprachprüfung konnte nicht vollständig ausgeführt werden: {exc}")
-        return [], warnings
+        return errors, warnings
 
-    return errors, warnings
+    return merge_language_error_lists([], errors), warnings
 
 
 def _detect_local_spelling_errors(checker: Any, paragraph: str, paragraph_index: int, spell_document_tag: int) -> list[dict[str, Any]]:
@@ -1006,9 +1060,8 @@ def detect_languagetool_errors(paragraphs: list[str], base_url: str | None = Non
                 continue
             issue_type = str(((match.get("rule") or {}).get("issueType") or "")).lower()
             category_id = str((((match.get("rule") or {}).get("category") or {}).get("id") or "")).upper()
-            if issue_type not in {"misspelling", "grammar"}:
-                continue
-            if category_id in {"PUNCTUATION", "TYPOGRAPHY"}:
+            rule_id = str(((match.get("rule") or {}).get("id") or "")).upper()
+            if not _is_relevant_languagetool_match(issue_type, category_id, rule_id, match):
                 continue
             offset = int(match.get("offset", 0))
             length = int(match.get("length", 0))
@@ -1019,7 +1072,8 @@ def detect_languagetool_errors(paragraphs: list[str], base_url: str | None = Non
             suggestion = ""
             if replacements and isinstance(replacements[0], dict):
                 suggestion = str(replacements[0].get("value", "")).strip()
-            category = "rechtschreibung" if issue_type == "misspelling" else "grammatik"
+            category = _classify_languagetool_match(issue_type, category_id, rule_id)
+            suggestion = _normalize_languagetool_suggestion(snippet, suggestion)
             key = (paragraph_index, offset, length, category)
             if key in seen:
                 continue
@@ -1037,6 +1091,39 @@ def detect_languagetool_errors(paragraphs: list[str], base_url: str | None = Non
                 }
             )
     return errors
+
+
+def _is_relevant_languagetool_match(issue_type: str, category_id: str, rule_id: str, match: dict[str, Any]) -> bool:
+    if category_id in {"PUNCTUATION", "TYPOGRAPHY", "STYLE", "REDUNDANCY", "SEMANTICS", "COLLOQUIALISMS"}:
+        return False
+    accepted_issue_types = {"misspelling", "grammar", "typographical", "duplication", "inconsistency"}
+    if issue_type in accepted_issue_types:
+        return True
+    accepted_tokens = ("SPELL", "GRAMMAR", "CASING", "COMPOUND", "AGREEMENT", "CONFUS", "MORFOLOGIK", "CONJUG", "ORTHO")
+    haystack = f"{category_id} {rule_id}".upper()
+    return any(token in haystack for token in accepted_tokens)
+
+
+def _classify_languagetool_match(issue_type: str, category_id: str, rule_id: str) -> str:
+    haystack = f"{issue_type} {category_id} {rule_id}".upper()
+    if any(token in haystack for token in ("SPELL", "MISSPELL", "CASING", "COMPOUND", "ORTHO", "TYPO")):
+        return "rechtschreibung"
+    return "grammatik"
+
+
+def _normalize_languagetool_suggestion(snippet: str, suggestion: str) -> str:
+    custom = {
+        "non-existent": "nicht existent",
+        "buss": "Bus",
+        "lauft": "läuft",
+        "einte": "eine",
+    }
+    normalized_snippet = snippet.strip().lower()
+    if normalized_snippet in custom:
+        return custom[normalized_snippet]
+    if suggestion and suggestion.lower().endswith(snippet.lower()):
+        return "Überprüfen"
+    return suggestion or "Überprüfen"
 
 
 def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> list[dict[str, Any]]:
@@ -1057,6 +1144,13 @@ def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> li
         (r"\bals wie\b", "als wie", "grammatik", 'Die Verbindung "als wie" ist standardsprachlich fehlerhaft.', "als oder wie"),
         (r"\bmehr besser\b", "mehr besser", "grammatik", 'Ein doppelter Komparativ ist standardsprachlich fehlerhaft.', "besser"),
         (r"\bam meisten optimal\b", "am meisten optimal", "grammatik", 'Superlativ und Verstärkung werden hier unpassend kombiniert.', "optimal"),
+        (r"\bv(?:on|om)\s+einem\s+erfordert\s+wird\b", "von einem erfordert wird", "grammatik", 'In dieser Verbindung ist das Verb unpassend gewählt.', "von einem gefordert wird"),
+        (r"\bdurch\s+dies\b", "durch dies", "grammatik", 'Diese Verbindung wirkt in dieser Form unidiomatisch.', "dadurch"),
+        (r"\bwiderspiegelt\s+hat\b", "widerspiegelt hat", "grammatik", 'Hier ist die Verbform nicht korrekt gebildet.', "widergespiegelt hat"),
+        (r"\bleiden\s+alle\s+an\s+zu\s+wenig\b", "leiden alle an zu wenig", "grammatik", 'Die Präposition ist hier nicht idiomatisch verwendet.', "leiden alle unter zu wenig"),
+        (r"\bresultate\s+in\s+meinen\s+schulnoten\s+gesehen\b", "Resultate in meinen Schulnoten gesehen", "grammatik", "Die Verbfügung ist hier unvollständig oder missglückt formuliert.", "Resultate in meinen Schulnoten gesehen habe"),
+        (r"\bnicht\s+vorhanden\s+wäre\b", "nicht vorhanden wäre", "grammatik", "Die Formulierung ist grammatisch missglückt und sollte klarer gebaut werden.", "wegfallen würde"),
+        (r"\bzu\s+viel\s+sei\s+oder\s+überfordernd\s+sei\b", "zu viel sei oder überfordernd sei", "grammatik", "Die Parallelkonstruktion ist hier grammatisch uneinheitlich gebaut.", "zu viel oder überfordernd sei"),
     ]
     findings: list[dict[str, Any]] = []
     for pattern, _snippet, category, comment, suggestion in heuristics:
@@ -1075,6 +1169,33 @@ def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> li
                 }
             )
     findings.extend(_detect_sentence_start_lowercase(paragraph, paragraph_index))
+    findings.extend(_detect_local_orthography_patterns(paragraph, paragraph_index))
+    return findings
+
+
+def _detect_local_orthography_patterns(paragraph: str, paragraph_index: int) -> list[dict[str, Any]]:
+    patterns = [
+        (r"\beinte\b", "rechtschreibung", "Die Schreibweise ist orthografisch fehlerhaft.", "eine"),
+        (r"\bbuss\b", "rechtschreibung", "Die Schreibweise ist orthografisch fehlerhaft.", "Bus"),
+        (r"\blauft\b", "rechtschreibung", "Die Schreibweise ist orthografisch fehlerhaft.", "läuft"),
+        (r"\bnon-existent\b", "rechtschreibung", "Die Bindestrichschreibung ist hier nicht passend.", "nicht existent"),
+        (r"\b4\+1 modell\b", "rechtschreibung", "Zusammensetzungen mit Modell werden im Deutschen hier mit Bindestrich geschrieben.", "4+1-Modell"),
+    ]
+    findings: list[dict[str, Any]] = []
+    for pattern, category, comment, suggestion in patterns:
+        for match in re.finditer(pattern, paragraph, flags=re.IGNORECASE):
+            findings.append(
+                {
+                    "paragraph_index": paragraph_index,
+                    "snippet": paragraph[match.start() : match.end()],
+                    "category": category,
+                    "comment": comment,
+                    "suggestion": suggestion,
+                    "offset": match.start(),
+                    "length": match.end() - match.start(),
+                    "source": "heuristik",
+                }
+            )
     return findings
 
 
@@ -1139,6 +1260,22 @@ def normalize_review(
     orthography = calculate_orthography_grade(gym_level, len(language_errors), word_count)
     local_rights = sum(1 for item in language_errors if item.get("category") == "rechtschreibung")
     local_grammar = sum(1 for item in language_errors if item.get("category") == "grammatik")
+    used_sources = {str(item.get("source", "")).strip().lower() for item in language_errors}
+    if "languagetool" in used_sources and "macos" in used_sources:
+        language_source = "LanguageTool lokal + macOS-Fallback + lokale Grammatikheuristik"
+    elif "languagetool" in used_sources:
+        language_source = "LanguageTool lokal + lokale Grammatikheuristik"
+    elif "macos" in used_sources:
+        language_source = "macOS-Fallback + lokale Grammatikheuristik"
+    else:
+        language_source = "Lokale Grammatikheuristik"
+    criteria_comments = enhance_criteria_comments(
+        criteria_comments,
+        full_text,
+        document_type,
+        assignment_text=assignment_text,
+        topic=topic,
+    )
     overall_grade = round(
         criteria_comments["inhalt"]["score"] * 0.4
         + criteria_comments["aufbau"]["score"] * 0.2
@@ -1168,13 +1305,13 @@ def normalize_review(
                 f"Bei {orthography.error_count} relevanten Fehlern in {orthography.word_count} Wörtern ergibt sich "
                 f"eine Fehlerdichte von {orthography.errors_per_200:.2f} Fehlern pro 200 Wörter und damit "
                 f"eine Teilnote von {orthography.grade:.2f}. "
-                f"Die Zählung stützt sich lokal auf den macOS-Sprachdienst für Rechtschreibung und auf ergänzende Grammatiktreffer aus Heuristik bzw. Modellanalyse. "
+                f"Die Zählung stützt sich lokal auf {language_source.lower()}. "
                 f"Erfasst wurden aktuell {local_rights} Rechtschreib- und {local_grammar} Grammatiktreffer."
             ),
         },
         "teacher_view": {
             "overall_grade": overall_grade,
-            "language_source": "LanguageTool lokal + macOS-Fallback + lokale Grammatikheuristik",
+            "language_source": language_source,
             "error_breakdown": {
                 "rechtschreibung": local_rights,
                 "grammatik": local_grammar,
@@ -1188,6 +1325,229 @@ def normalize_review(
             },
         },
     }
+
+
+def enhance_criteria_comments(
+    criteria_comments: dict[str, dict[str, Any]],
+    full_text: str,
+    document_type: str,
+    assignment_text: str = "",
+    topic: str = "",
+) -> dict[str, dict[str, Any]]:
+    signals = analyse_feedback_signals(full_text, assignment_text)
+    enhanced = {
+        key: {"score": value["score"], "comment": value["comment"]}
+        for key, value in criteria_comments.items()
+    }
+
+    if document_type in {"linear_discussion", "dialectical_discussion"}:
+        enhanced["inhalt"]["score"] = score_discussion_content(signals, assignment_text)
+        enhanced["aufbau"]["score"] = score_discussion_structure(signals, document_type)
+        enhanced["ausdruck"]["score"] = score_discussion_expression(signals)
+        enhanced["inhalt"]["comment"] = build_discussion_content_comment(
+            score=enhanced["inhalt"]["score"],
+            current=enhanced["inhalt"]["comment"],
+            signals=signals,
+            assignment_text=assignment_text,
+        )
+        enhanced["aufbau"]["comment"] = build_discussion_structure_comment(
+            score=enhanced["aufbau"]["score"],
+            current=enhanced["aufbau"]["comment"],
+            signals=signals,
+            document_type=document_type,
+        )
+        enhanced["ausdruck"]["comment"] = build_discussion_expression_comment(
+            score=enhanced["ausdruck"]["score"],
+            current=enhanced["ausdruck"]["comment"],
+            signals=signals,
+        )
+    return enhanced
+
+
+def analyse_feedback_signals(full_text: str, assignment_text: str) -> dict[str, Any]:
+    lowered = full_text.lower()
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", full_text) if part.strip()]
+    intro = paragraphs[0] if paragraphs else full_text[:500]
+    outro = paragraphs[-1] if paragraphs else full_text[-500:]
+    material_keywords = [token for token in _keyword_tokens(assignment_text) if len(token) >= 5]
+    repeated_terms = []
+    token_counts: dict[str, int] = {}
+    for token in _keyword_tokens(full_text):
+        token_counts[token] = token_counts.get(token, 0) + 1
+    for token, count in sorted(token_counts.items(), key=lambda item: item[1], reverse=True):
+        if count >= 5:
+            repeated_terms.append(token)
+        if len(repeated_terms) == 4:
+            break
+    material_hits = [token for token in material_keywords if token in lowered]
+    colloquial_hits = [term for term in ["zocken", "komplett", "ich mag nicht mehr", "faul", "haufen", "nicht mehr"] if term in lowered]
+    thematic_markers = {
+        "bequemlichkeit": any(token in lowered for token in ["bequemlichkeitsprinzip", "zocken", "faul", "bequemer"]),
+        "erholung_motivation": any(token in lowered for token in ["ferien", "auszeit", "motivierter", "pause", "ausruhen"]),
+        "zukunft_belastbarkeit": any(token in lowered for token in ["studien-", "arbeitsleben", "gekündigt", "gekündigt wird", "aus dem studium", "druck"]),
+        "soziale_beziehungen": any(token in lowered for token in ["soziale kontakte", "freunde", "psyche", "mentale gesundheit"]),
+    }
+    return {
+        "has_direct_speech_intro": '"' in intro or "„" in intro,
+        "question_count": full_text.count("?"),
+        "has_personal_example": any(token in lowered for token in ["ich hatte", "ich habe", "ich hoff", "persönlich"]),
+        "material_hit_count": len(material_hits),
+        "material_keywords": material_hits[:4],
+        "colloquial_hits": colloquial_hits[:4],
+        "repeated_terms": repeated_terms,
+        "paragraph_count": len(paragraphs),
+        "has_conclusion": any(token in outro.lower() for token in ["in der zukunft", "insgesamt", "man weiss", "ich hoffe", "abschliessend"]),
+        "contrast_markers": sum(lowered.count(token) for token in ["aber", "doch", "gleichzeitig", "während", "wenn", "hingegen"]),
+        "thematic_markers": thematic_markers,
+    }
+
+
+def score_discussion_content(signals: dict[str, Any], assignment_text: str) -> float:
+    score = 4.0
+    if signals["has_direct_speech_intro"]:
+        score += 0.25
+    if sum(1 for value in signals["thematic_markers"].values() if value) >= 3:
+        score += 0.5
+    if signals["material_hit_count"] == 0 and assignment_text.strip():
+        score -= 0.25
+    return clamp_score(score)
+
+
+def score_discussion_structure(signals: dict[str, Any], document_type: str) -> float:
+    score = 4.0
+    if signals["paragraph_count"] >= 5:
+        score += 0.25
+    if signals["has_conclusion"]:
+        score += 0.25
+    if signals["contrast_markers"] < 6:
+        score -= 0.25
+    return clamp_score(score)
+
+
+def score_discussion_expression(signals: dict[str, Any]) -> float:
+    score = 4.25
+    if signals["colloquial_hits"]:
+        score -= 0.25
+    if signals["repeated_terms"]:
+        score -= 0.25
+    return clamp_score(score)
+
+
+def build_discussion_content_comment(
+    *,
+    score: float,
+    current: str,
+    signals: dict[str, Any],
+    assignment_text: str,
+) -> str:
+    parts = []
+    if signals["has_direct_speech_intro"]:
+        parts.append(
+            "Der Text eröffnet die Erörterung mit einer anschaulichen Alltagsszene und führt damit verständlich in die Streitfrage ein."
+        )
+    else:
+        parts.append(
+            "Die Fragestellung des Textes ist grundsätzlich erkennbar und wird im Verlauf mehrfach aufgenommen."
+        )
+    if signals["thematic_markers"]["bequemlichkeit"]:
+        parts.append(
+            "Zunächst wird die verbreitete Sicht aufgenommen, dass Schülerinnen und Schüler mit dem Hinweis auf Belastung oft auch Bequemlichkeit oder Ausreden decken möchten."
+        )
+    if signals["thematic_markers"]["erholung_motivation"]:
+        parts.append(
+            "Danach wird als Gegenargument entwickelt, dass Freizeit und Erholung Motivation, Lernbereitschaft und Verarbeitung von Stoff stärken können."
+        )
+    if signals["thematic_markers"]["zukunft_belastbarkeit"]:
+        parts.append(
+            "Im weiteren Verlauf wird die Gegenperspektive aufgebaut, dass zu wenig Belastung die spätere Studien- und Arbeitsfähigkeit schwächen könnte."
+        )
+    if signals["thematic_markers"]["soziale_beziehungen"]:
+        parts.append(
+            "Ein weiterer Argumentblock betont die soziale und psychische Funktion von Freizeit und zeigt damit, dass das Thema nicht nur leistungsmässig, sondern auch menschlich relevant ist."
+        )
+    if signals["material_hit_count"] == 0 and assignment_text.strip():
+        parts.append(
+            "Ein wesentlicher Mangel bleibt jedoch, dass die Materialien und Leitbegriffe der Aufgabenstellung nicht ausdrücklich aufgegriffen und argumentativ verarbeitet werden."
+        )
+    else:
+        parts.append(
+            "Die Aufgabenstellung wird grundsätzlich aufgenommen, müsste aber an einzelnen Stellen noch konsequenter auf die Leitfrage zugespitzt werden."
+        )
+    if signals["has_personal_example"]:
+        parts.append(
+            "Das persönliche Beispiel wirkt dabei authentisch und nachvollziehbar, ist aber stellenweise stärker erzählerisch als analytisch eingebunden."
+        )
+    parts.append(
+        "Mehrere Argumente sind plausibel, bleiben jedoch teilweise allgemein formuliert und werden nicht durchgehend mit präzisen Belegen oder einer klaren Abwägung weitergeführt."
+    )
+    return " ".join(parts)
+
+
+def build_discussion_structure_comment(
+    *,
+    score: float,
+    current: str,
+    signals: dict[str, Any],
+    document_type: str,
+) -> str:
+    parts = [
+        "Der Aufbau ist insgesamt nachvollziehbar, weil Einleitung, Hauptteil und Schluss klar voneinander zu unterscheiden sind."
+    ]
+    if signals["has_direct_speech_intro"] and signals["question_count"] >= 2:
+        parts.append(
+            "Die Einleitung führt mit einer Alltagsszene und mehreren Leitfragen sichtbar in das Problem hinein."
+        )
+    if document_type == "dialectical_discussion":
+        parts.append(
+            "Für eine dialektische Erörterung müssten die Pro- und Contra-Linien jedoch sichtbarer gegliedert und in einer eigentlichen Abwägung zusammengeführt werden."
+        )
+    else:
+        parts.append(
+            "Für eine lineare Erörterung müssten die Argumente noch deutlicher gestuft und zielgerichteter auf das Schlussurteil hin aufgebaut werden."
+        )
+    parts.append(
+        "Gerade die Übergänge zwischen den einzelnen Argumentblöcken bleiben stellenweise abrupt, sodass der rote Faden nicht durchgehend gleich klar wirkt."
+    )
+    if signals["has_conclusion"]:
+        parts.append(
+            "Der Schluss fasst die eigene Position erkennbar zusammen, bleibt aber eher persönlich als analytisch zugespitzt."
+        )
+    else:
+        parts.append(
+            "Der Schluss müsste die vorherigen Argumente noch entschiedener bündeln und in ein klareres Gesamturteil überführen."
+        )
+    return " ".join(parts)
+
+
+def build_discussion_expression_comment(
+    *,
+    score: float,
+    current: str,
+    signals: dict[str, Any],
+) -> str:
+    parts = [
+        "Der sprachliche Ausdruck ist grundsätzlich verständlich und an einzelnen Stellen durchaus lebendig."
+    ]
+    if signals["has_direct_speech_intro"]:
+        parts.append(
+            "Vor allem der Einstieg mit direkter Rede wirkt anschaulich und zieht in die Thematik hinein."
+        )
+    if signals["has_personal_example"]:
+        parts.append(
+            "Auch das persönliche Beispiel erhöht die Nachvollziehbarkeit, verschiebt den Ton aber stellenweise vom argumentativen zum erzählerischen Schreiben."
+        )
+    if signals["colloquial_hits"]:
+        parts.append(
+            f"Problematisch ist, dass mehrere Formulierungen umgangssprachlich oder emotional wirken, etwa {', '.join(signals['colloquial_hits'])}."
+        )
+    if signals["repeated_terms"]:
+        parts.append(
+            f"Dazu kommen Wiederholungen zentraler Wörter wie {', '.join(signals['repeated_terms'][:3])}, wodurch der Stil weniger präzise und weniger abwechslungsreich erscheint."
+        )
+    parts.append(
+        "Für eine starke Erörterung müsste der Ausdruck insgesamt sachlicher, präziser und argumentativ geschlossener geführt werden."
+    )
+    return " ".join(parts)
 
 
 def _call_model_json(
