@@ -10,6 +10,7 @@ const elements = {
   confirmDossierButton: document.getElementById("confirmDossierButton"),
   dossierConfirmStatus: document.getElementById("dossierConfirmStatus"),
   documentType: document.getElementById("documentType"),
+  formQuickButtons: Array.from(document.querySelectorAll(".quick-form-button")),
   formGuideText: document.getElementById("formGuideText"),
   exampleAssignmentButton: document.getElementById("exampleAssignmentButton"),
   exampleAssignmentText: document.getElementById("exampleAssignmentText"),
@@ -24,7 +25,9 @@ const elements = {
   model: document.getElementById("model"),
   healthButton: document.getElementById("healthButton"),
   reviewButton: document.getElementById("reviewButton"),
+  resetButton: document.getElementById("resetButton"),
   statusBox: document.getElementById("statusBox"),
+  warningBox: document.getElementById("warningBox"),
   healthBox: document.getElementById("healthBox"),
   resultPanel: document.getElementById("resultPanel"),
   metadataBox: document.getElementById("metadataBox"),
@@ -42,6 +45,7 @@ let dossierCandidates = [];
 let confirmedDossierIndex = -1;
 let dossierConfirmationRequired = false;
 const PENDING_FILE_KEY = "korrekturroboter_pending_file";
+const DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx";
 
 const FORM_GUIDES = {
   auto: {
@@ -103,12 +107,16 @@ const FORM_GUIDES = {
 
 elements.healthButton.addEventListener("click", checkHealth);
 elements.reviewButton.addEventListener("click", generateReview);
+elements.resetButton.addEventListener("click", resetFormState);
 elements.downloadButton.addEventListener("click", downloadReview);
 elements.assignmentToggle.addEventListener("click", toggleAssignment);
 elements.exampleAssignmentButton.addEventListener("click", applyExampleAssignment);
 elements.dossierDetectButton.addEventListener("click", detectDossierContext);
 elements.confirmDossierButton.addEventListener("click", confirmSelectedDossierCandidate);
 elements.documentType.addEventListener("change", syncFormGuide);
+elements.formQuickButtons.forEach((button) => {
+  button.addEventListener("click", () => setDocumentTypeFromQuickButton(button.dataset.form || "auto"));
+});
 elements.docxFile.addEventListener("change", handleFileInput);
 elements.dossierFile.addEventListener("change", handleDossierInput);
 elements.uploadBox.addEventListener("dragover", handleDragOver);
@@ -119,7 +127,9 @@ elements.dossierUploadBox.addEventListener("dragleave", handleDossierDragLeave);
 elements.dossierUploadBox.addEventListener("drop", handleDossierDrop);
 
 syncFormGuide();
+elements.model.value = DEFAULT_MODEL_ID;
 updateReviewButtonState();
+clearWarnings();
 restorePendingFile();
 
 async function checkHealth() {
@@ -185,10 +195,12 @@ async function generateReview() {
 
     currentResult = payload;
     renderResult(payload.review);
+    showWarnings([...(payload.dossier_context?.warnings || []), ...(payload.review?.warnings || [])]);
     setStatus("Korrigiertes DOCX wurde erfolgreich erzeugt.", "ok");
   } catch (error) {
     currentResult = null;
     elements.resultPanel.classList.add("hidden");
+    clearWarnings();
     setStatus(buildLmStudioHelp(error.message), "error");
   } finally {
     elements.reviewButton.disabled = false;
@@ -407,10 +419,12 @@ async function detectDossierContext(silent = false) {
     }
 
     applyDetectedContext(payload.dossier_context || {});
+    showWarnings(buildDossierWarnings(payload.dossier_context || {}));
     if (!silent) {
       setStatus("Themenliste aus dem Prüfungsdossier wurde erzeugt. Bitte das passende Thema bestätigen.", "ok");
     }
   } catch (error) {
+    clearWarnings();
     if (!silent) {
       setStatus(error.message, "error");
     } else {
@@ -444,6 +458,16 @@ function applyDetectedContext(context) {
   updateReviewButtonState();
 }
 
+function buildDossierWarnings(context) {
+  const warnings = [...(context.warnings || [])];
+  if (context.pipeline?.mode === "two_stage_local") {
+    warnings.unshift(
+      `Zweistufige Dossieranalyse aktiv: ${context.pipeline.stage_1 || "Themen extrahieren"} ${context.pipeline.stage_2 || "Abgleich mit dem Aufsatz"}`.trim()
+    );
+  }
+  return warnings;
+}
+
 function renderDossierCandidates() {
   if (!dossierCandidates.length) {
     elements.dossierCandidateSection.classList.add("hidden");
@@ -470,7 +494,7 @@ function renderDossierCandidates() {
                 <span class="candidate-meta">${escapeHtml(typeLabel)}</span>
                 <span class="candidate-meta">Treffer ${escapeHtml(score.toString())}</span>
               </span>
-              <p class="candidate-text">${formatText(assignment)}</p>
+              <p class="candidate-text"><strong>Aufgabe:</strong> ${formatText(assignment)}</p>
             </span>
           </span>
         </label>
@@ -533,6 +557,35 @@ function updateReviewButtonState() {
   elements.reviewButton.disabled = !selectedFile || dossierConfirmationRequired;
 }
 
+function resetFormState() {
+  currentResult = null;
+  assignmentVisible = false;
+  selectedFile = null;
+  selectedDossier = null;
+  clearDossierCandidates();
+
+  elements.docxFile.value = "";
+  elements.dossierFile.value = "";
+  elements.documentType.value = "auto";
+  elements.topicInput.value = "";
+  elements.thesisInput.value = "";
+  elements.assignmentInput.value = "";
+  elements.assignmentWrap.classList.add("hidden");
+  elements.assignmentToggle.textContent = "Aufgabenstellung eingeben";
+  elements.gymLevel.value = "1";
+  elements.model.value = DEFAULT_MODEL_ID;
+  elements.fileStatus.textContent = "Noch keine Datei geladen.";
+  elements.fileStatus.className = "status";
+  elements.dossierStatus.textContent = "Noch kein Prüfungsdossier geladen.";
+  elements.dossierStatus.className = "status";
+  elements.resultPanel.classList.add("hidden");
+  elements.healthBox.innerHTML = "";
+  clearWarnings();
+  setStatus("Alle Eingaben wurden zurückgesetzt.", "ok");
+  syncFormGuide();
+  updateReviewButtonState();
+}
+
 function restorePendingFile() {
   const raw = sessionStorage.getItem(PENDING_FILE_KEY);
   if (!raw) {
@@ -575,6 +628,18 @@ function syncFormGuide() {
   elements.topicInput.placeholder = guide.topicPlaceholder;
   elements.thesisLabel.textContent = `${guide.thesisLabel} (optional)`;
   elements.thesisInput.placeholder = guide.thesisPlaceholder;
+  syncQuickFormButtons();
+}
+
+function setDocumentTypeFromQuickButton(value) {
+  elements.documentType.value = value;
+  syncFormGuide();
+}
+
+function syncQuickFormButtons() {
+  elements.formQuickButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.form === elements.documentType.value);
+  });
 }
 
 function downloadReview() {
@@ -628,6 +693,22 @@ function setStatus(message, variant) {
 function setHealth(message, variant) {
   elements.healthBox.innerHTML = formatStatusMarkup(message);
   elements.healthBox.className = variant ? `health ${variant}` : "health";
+}
+
+function showWarnings(items) {
+  const warnings = (items || []).filter(Boolean);
+  if (!warnings.length) {
+    clearWarnings();
+    return;
+  }
+  elements.warningBox.innerHTML = formatStatusMarkup(warnings.join("\n"));
+  elements.warningBox.className = "status warning";
+  elements.warningBox.classList.remove("hidden");
+}
+
+function clearWarnings() {
+  elements.warningBox.innerHTML = "";
+  elements.warningBox.className = "status warning hidden";
 }
 
 function formatStatusMarkup(message) {

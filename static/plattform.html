@@ -34,8 +34,19 @@
             <div id="fileStatus" class="status">Noch keine Datei geladen.</div>
           </div>
 
+          <div class="field full-span">
+            <span>Form direkt wählen</span>
+            <div id="formQuickButtons" class="quick-form-row">
+              <button class="ghost small quick-form-button" type="button" data-form="linear_discussion">Lineare Erörterung</button>
+              <button class="ghost small quick-form-button" type="button" data-form="dialectical_discussion">Dialektische Erörterung</button>
+              <button class="ghost small quick-form-button" type="button" data-form="essay">Essay</button>
+              <button class="ghost small quick-form-button" type="button" data-form="speech">Rede</button>
+              <button class="ghost small quick-form-button" type="button" data-form="auto">Weitere Formen</button>
+            </div>
+          </div>
+
           <label class="field">
-            <span>Form</span>
+            <span>Form (Dropdown)</span>
             <select id="documentType">
               <option value="auto">Automatisch erkennen</option>
               <option value="essay">Essay</option>
@@ -134,9 +145,11 @@
         <div class="actions">
           <button id="healthButton" class="ghost" type="button">LM Studio prüfen</button>
           <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
+          <button id="resetButton" class="ghost" type="button">Eingaben zurücksetzen</button>
         </div>
 
         <div id="statusBox" class="status" aria-live="polite">Bereit.</div>
+        <div id="warningBox" class="status warning hidden"></div>
         <div id="healthBox" class="health"></div>
       </section>
 

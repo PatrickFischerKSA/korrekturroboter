@@ -227,11 +227,29 @@ button:disabled {
   color: var(--accent-strong);
 }
 
+.status.warning,
+.health.warning {
+  border-color: rgba(169, 115, 0, 0.28);
+  color: #8a5a00;
+  background: #fff8ea;
+}
+
 .inline-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+}
+
+.quick-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.quick-form-button.active {
+  background: var(--accent);
+  color: #fff;
 }
 
 .guide-box {
