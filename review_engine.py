@@ -1158,13 +1158,24 @@ def run_review(
             topic=topic,
             thesis=thesis,
         )
-        chunk_result = _call_model_json(
-            base_url,
-            model_name,
-            stage1_system,
-            stage1_user,
-            max_tokens=limits["stage1_max_tokens"],
-        )
+        try:
+            chunk_result = _call_model_json(
+                base_url,
+                model_name,
+                stage1_system,
+                stage1_user,
+                max_tokens=limits["stage1_max_tokens"],
+            )
+        except ReviewError:
+            review_warnings.append(
+                f"Abschnitt {index + 1} konnte nicht stabil als JSON gelesen werden. "
+                "Für diesen Teil wurde eine lokale Ersatzanalyse verwendet."
+            )
+            chunk_result = _fallback_chunk_result(
+                chunk,
+                document_type=detected_type,
+                chunk_index=index,
+            )
         for field_name in ("annotations", "language_errors"):
             for item in chunk_result.get(field_name, []) or []:
                 try:
@@ -1187,18 +1198,38 @@ def run_review(
     )
     prompt_tokens = estimate_tokens(stage2_system) + estimate_tokens(stage2_user)
     if prompt_tokens > 3000:
-        raise ReviewError(
-            "Die verdichtete Gesamtauswertung ist für das aktuelle lokale Modell noch zu umfangreich. "
-            "Bitte nutze ein Modell mit größerem Kontextfenster oder reduziere den Textumfang."
+        review_warnings.append(
+            "Die verdichtete Gesamtauswertung wäre für das aktuelle lokale Modell zu umfangreich geworden. "
+            "Das Gesamtfeedback wurde deshalb direkt aus den Abschnittsanalysen aufgebaut."
         )
-
-    stage2_payload = _call_model_json(
-        base_url,
-        model_name,
-        stage2_system,
-        stage2_user,
-        max_tokens=limits["stage2_max_tokens"],
-    )
+        stage2_payload = _build_fallback_stage2_payload(
+            document_type=detected_type,
+            assignment_text=assignment_text,
+            topic=topic,
+            thesis=thesis,
+            aggregated=aggregated,
+        )
+    else:
+        try:
+            stage2_payload = _call_model_json(
+                base_url,
+                model_name,
+                stage2_system,
+                stage2_user,
+                max_tokens=limits["stage2_max_tokens"],
+            )
+        except ReviewError:
+            review_warnings.append(
+                "Die verdichtete Gesamtauswertung konnte nicht stabil als JSON gelesen werden. "
+                "Das Gesamtfeedback wurde deshalb lokal aus den Abschnittsanalysen zusammengesetzt."
+            )
+            stage2_payload = _build_fallback_stage2_payload(
+                document_type=detected_type,
+                assignment_text=assignment_text,
+                topic=topic,
+                thesis=thesis,
+                aggregated=aggregated,
+            )
     stage2_payload["annotations"] = aggregated["annotations"]
     stage2_payload["language_errors"] = aggregated["language_errors"]
     normalized = normalize_review(
