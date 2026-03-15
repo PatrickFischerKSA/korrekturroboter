@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
+from urllib.parse import urlencode, urlparse
 
 try:
     from AppKit import NSSpellChecker
@@ -18,6 +19,7 @@ except Exception:
 
 LM_STUDIO_BASE_URL = os.environ.get("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "").strip()
+LANGUAGETOOL_BASE_URL = os.environ.get("LANGUAGETOOL_BASE_URL", "http://127.0.0.1:8081/v2").rstrip("/")
 DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx"
 MAX_REVIEW_TEXT_CHARS = 9000
 MAX_DOSSIER_SCAN_PARAGRAPHS = 120
@@ -29,6 +31,7 @@ SCHOOL_MODE_CHUNK_CHARS = 1800
 SCHOOL_MODE_CHUNK_PARAGRAPHS = 3
 SCHOOL_MODE_STAGE1_MAX_TOKENS = 700
 SCHOOL_MODE_STAGE2_MAX_TOKENS = 1100
+ALLOWED_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 ESSAY_GUIDELINES = {
@@ -616,6 +619,32 @@ def fetch_model(base_url: str) -> str:
     return models[0]["id"]
 
 
+def strict_local_service_url(candidate: str, service_name: str) -> str:
+    normalized = (candidate or "").rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ReviewError(f"Die {service_name}-URL ist ungültig.")
+    if parsed.hostname not in ALLOWED_LOCAL_HOSTS:
+        raise ReviewError(f"Im Datenschutzmodus sind nur lokale {service_name}-Endpunkte erlaubt.")
+    return normalized
+
+
+def get_languagetool_base_url() -> str:
+    return strict_local_service_url(LANGUAGETOOL_BASE_URL, "LanguageTool")
+
+
+def check_languagetool_health(base_url: str | None = None) -> dict[str, Any]:
+    normalized = strict_local_service_url(base_url or LANGUAGETOOL_BASE_URL, "LanguageTool")
+    payload = _http_get_json(f"{normalized}/languages", timeout=10)
+    if not isinstance(payload, list):
+        raise ReviewError("LanguageTool hat ein ungültiges Antwortformat geliefert.")
+    languages = [str(entry.get("longCode") or entry.get("code") or "") for entry in payload if isinstance(entry, dict)]
+    return {
+        "base_url": normalized,
+        "languages": [item for item in languages if item],
+    }
+
+
 def build_prompt(
     text: str,
     document_type: str,
@@ -858,11 +887,18 @@ def merge_language_error_lists(primary: list[dict[str, Any]], extra: list[dict[s
 
 def detect_local_language_errors(paragraphs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
-    if not MAC_SPELLCHECK_AVAILABLE:
-        warnings.append("Der lokale macOS-Sprachdienst ist auf diesem System nicht verfügbar.")
-        return [], warnings
+    errors: list[dict[str, Any]] = []
 
-    errors = []
+    try:
+        lt_errors = detect_languagetool_errors(paragraphs)
+        errors = merge_language_error_lists(errors, lt_errors)
+        warnings.append("Kriterium 4 nutzt den lokalen LanguageTool-Server auf localhost als primäre Sprachprüfung.")
+    except ReviewError as exc:
+        warnings.append(f"LanguageTool lokal nicht verfügbar: {exc}")
+
+    if not MAC_SPELLCHECK_AVAILABLE:
+        return errors, warnings
+
     checker = NSSpellChecker.sharedSpellChecker()
     spell_document_tag = 0
 
@@ -919,16 +955,80 @@ def _detect_local_spelling_errors(checker: Any, paragraph: str, paragraph_index:
     return errors
 
 
+def detect_languagetool_errors(paragraphs: list[str], base_url: str | None = None) -> list[dict[str, Any]]:
+    normalized = strict_local_service_url(base_url or LANGUAGETOOL_BASE_URL, "LanguageTool")
+    errors: list[dict[str, Any]] = []
+    seen: set[tuple[int, int, int, str]] = set()
+
+    for paragraph_index, paragraph in enumerate(paragraphs):
+        if not paragraph.strip():
+            continue
+        payload = _http_post_form(
+            f"{normalized}/check",
+            {
+                "text": paragraph,
+                "language": "de-CH",
+                "enabledOnly": "false",
+                "level": "picky",
+            },
+            timeout=30,
+        )
+        matches = payload.get("matches", [])
+        if not isinstance(matches, list):
+            continue
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            issue_type = str(((match.get("rule") or {}).get("issueType") or "")).lower()
+            category_id = str((((match.get("rule") or {}).get("category") or {}).get("id") or "")).upper()
+            if issue_type not in {"misspelling", "grammar"}:
+                continue
+            if category_id in {"PUNCTUATION", "TYPOGRAPHY"}:
+                continue
+            offset = int(match.get("offset", 0))
+            length = int(match.get("length", 0))
+            if length <= 0 or offset < 0 or offset >= len(paragraph):
+                continue
+            snippet = paragraph[offset : offset + length]
+            replacements = match.get("replacements", []) or []
+            suggestion = ""
+            if replacements and isinstance(replacements[0], dict):
+                suggestion = str(replacements[0].get("value", "")).strip()
+            category = "rechtschreibung" if issue_type == "misspelling" else "grammatik"
+            key = (paragraph_index, offset, length, category)
+            if key in seen:
+                continue
+            seen.add(key)
+            errors.append(
+                {
+                    "paragraph_index": paragraph_index,
+                    "snippet": snippet,
+                    "category": category,
+                    "comment": normalize_sentence(match.get("message", "")),
+                    "suggestion": suggestion or "Überprüfen",
+                }
+            )
+    return errors
+
+
 def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> list[dict[str, Any]]:
     heuristics = [
         (r"\bwir\s+ist\b", "wir ist", "grammatik", 'Nach dem Subjekt "wir" braucht es eine Verbform im Plural.', "wir sind"),
         (r"\bwir\s+hat\b", "wir hat", "grammatik", 'Nach dem Subjekt "wir" braucht es eine Verbform im Plural.', "wir haben"),
+        (r"\bwir\s+war\b", "wir war", "grammatik", 'Nach dem Subjekt "wir" braucht es im Präteritum eine Verbform im Plural.', "wir waren"),
         (r"\bich\s+sind\b", "ich sind", "grammatik", 'Nach dem Subjekt "ich" braucht es eine Verbform im Singular.', "ich bin"),
         (r"\bich\s+haben\b", "ich haben", "grammatik", 'Nach dem Subjekt "ich" braucht es eine Verbform im Singular.', "ich habe"),
+        (r"\bich\s+waren\b", "ich waren", "grammatik", 'Nach dem Subjekt "ich" braucht es im Präteritum eine Verbform im Singular.', "ich war"),
         (r"\bdu\s+ist\b", "du ist", "grammatik", 'Nach dem Subjekt "du" braucht es eine passende Verbform.', "du bist"),
         (r"\bdu\s+haben\b", "du haben", "grammatik", 'Nach dem Subjekt "du" braucht es eine passende Verbform.', "du hast"),
         (r"\bman\s+sind\b", "man sind", "grammatik", 'Nach dem unpersönlichen Subjekt "man" steht die Verbform im Singular.', "man ist"),
         (r"\bman\s+haben\b", "man haben", "grammatik", 'Nach dem unpersönlichen Subjekt "man" steht die Verbform im Singular.', "man hat"),
+        (r"\bes\s+haben\b", "es haben", "grammatik", 'Nach dem Subjekt "es" steht hier in der Regel die Verbform im Singular.', "es hat"),
+        (r"\b(?:die leute|die menschen|die kinder|die schüler|die schueler|die eltern)\s+ist\b", "die leute ist", "grammatik", "Nach einem pluralischen Subjekt braucht es eine Verbform im Plural.", "sind"),
+        (r"\b(?:die leute|die menschen|die kinder|die schüler|die schueler|die eltern)\s+hat\b", "die leute hat", "grammatik", "Nach einem pluralischen Subjekt braucht es eine Verbform im Plural.", "haben"),
+        (r"\bals wie\b", "als wie", "grammatik", 'Die Verbindung "als wie" ist standardsprachlich fehlerhaft.', "als oder wie"),
+        (r"\bmehr besser\b", "mehr besser", "grammatik", 'Ein doppelter Komparativ ist standardsprachlich fehlerhaft.', "besser"),
+        (r"\bam meisten optimal\b", "am meisten optimal", "grammatik", 'Superlativ und Verstärkung werden hier unpassend kombiniert.', "optimal"),
     ]
     findings: list[dict[str, Any]] = []
     lowered = paragraph.lower()
@@ -944,6 +1044,7 @@ def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> li
                     "suggestion": suggestion,
                 }
             )
+    findings.extend(_detect_sentence_start_lowercase(paragraph, paragraph_index))
     return findings
 
 
@@ -952,6 +1053,22 @@ def _find_original_snippet(paragraph: str, lowered_snippet: str) -> str:
     if not match:
         return lowered_snippet
     return paragraph[match.start() : match.end()]
+
+
+def _detect_sentence_start_lowercase(paragraph: str, paragraph_index: int) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for match in re.finditer(r"(?<=[.!?]\s)([a-zäöü][^\s,.!?;:]*)", paragraph):
+        snippet = match.group(1)
+        findings.append(
+            {
+                "paragraph_index": paragraph_index,
+                "snippet": snippet,
+                "category": "rechtschreibung",
+                "comment": "Nach einem Satzschluss sollte das nächste Wort mit einem Grossbuchstaben beginnen.",
+                "suggestion": snippet[:1].upper() + snippet[1:],
+            }
+        )
+    return findings
 
 
 def normalize_sentence(value: Any) -> str:
@@ -996,6 +1113,13 @@ def normalize_review(
     orthography = calculate_orthography_grade(gym_level, len(language_errors), word_count)
     local_rights = sum(1 for item in language_errors if item.get("category") == "rechtschreibung")
     local_grammar = sum(1 for item in language_errors if item.get("category") == "grammatik")
+    overall_grade = round(
+        criteria_comments["inhalt"]["score"] * 0.4
+        + criteria_comments["aufbau"]["score"] * 0.2
+        + criteria_comments["ausdruck"]["score"] * 0.2
+        + orthography.grade * 0.2,
+        2,
+    )
 
     return {
         "document_type": document_type,
@@ -1021,6 +1145,21 @@ def normalize_review(
                 f"Die Zählung stützt sich lokal auf den macOS-Sprachdienst für Rechtschreibung und auf ergänzende Grammatiktreffer aus Heuristik bzw. Modellanalyse. "
                 f"Erfasst wurden aktuell {local_rights} Rechtschreib- und {local_grammar} Grammatiktreffer."
             ),
+        },
+        "teacher_view": {
+            "overall_grade": overall_grade,
+            "language_source": "LanguageTool lokal + macOS-Fallback + lokale Grammatikheuristik",
+            "error_breakdown": {
+                "rechtschreibung": local_rights,
+                "grammatik": local_grammar,
+                "total": len(language_errors),
+            },
+            "criteria_overview": {
+                "inhalt": criteria_comments["inhalt"]["score"],
+                "aufbau": criteria_comments["aufbau"]["score"],
+                "ausdruck": criteria_comments["ausdruck"]["score"],
+                "sprachliche_korrektheit": orthography.grade,
+            },
         },
     }
 
@@ -1420,6 +1559,22 @@ def _http_post_json(url: str, payload: dict[str, Any], timeout: int) -> dict[str
         raise LMStudioHTTPError(exc.code, _read_http_error(exc)) from exc
     except error.URLError as exc:
         raise ReviewError(f"LM Studio ist nicht erreichbar: {exc.reason}") from exc
+
+
+def _http_post_form(url: str, payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+    req = request.Request(
+        url,
+        data=urlencode(payload).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        raise ReviewError(_read_http_error(exc)) from exc
+    except error.URLError as exc:
+        raise ReviewError(f"LanguageTool ist nicht erreichbar: {exc.reason}") from exc
 
 
 def _read_http_error(exc: error.HTTPError) -> str:

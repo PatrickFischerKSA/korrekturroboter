@@ -336,6 +336,22 @@ def _build_document_xml(source_name: str, paragraphs: list[str], review: dict, p
     _append_plain_paragraph(body, review.get("summary", ""))
     _append_plain_paragraph(body, "")
 
+    teacher_view = review.get("teacher_view", {})
+    if teacher_view:
+        _append_subheading(body, "Lehrpersonenansicht")
+        _append_plain_paragraph(
+            body,
+            f"Gesamtnote: {teacher_view.get('overall_grade', 0):.2f}. "
+            f"Sprachquelle: {teacher_view.get('language_source', 'nicht angegeben')}",
+        )
+        breakdown = teacher_view.get("error_breakdown", {})
+        _append_plain_paragraph(
+            body,
+            f"Fehlerbilanz: {breakdown.get('total', 0)} insgesamt, "
+            f"{breakdown.get('rechtschreibung', 0)} Rechtschreibung, "
+            f"{breakdown.get('grammatik', 0)} Grammatik.",
+        )
+
     criteria_labels = {
         "inhalt": "Kriterium 1 - Inhalt",
         "aufbau": "Kriterium 2 - Aufbau",
@@ -355,6 +371,17 @@ def _build_document_xml(source_name: str, paragraphs: list[str], review: dict, p
         f"{orthography['word_count']} Wörtern. Das entspricht {orthography['errors_per_200']:.2f} "
         f"Fehlern pro 200 Wörter.",
     )
+    language_errors = review.get("language_errors", [])
+    if language_errors:
+        _append_plain_paragraph(body, "Einzeln gezählte Fehler:")
+        for item in language_errors:
+            category = "Grammatik" if item.get("category") == "grammatik" else "Rechtschreibung"
+            paragraph_number = int(item.get("paragraph_index", 0)) + 1
+            _append_plain_paragraph(
+                body,
+                f"{category}, Absatz {paragraph_number}: {item.get('snippet', '')} | "
+                f"Hinweis: {item.get('comment', '')} | Vorschlag: {item.get('suggestion', '')}",
+            )
 
     _append_subheading(body, f"Gesamtnote ({calculate_overall_grade(review):.2f})")
     _append_plain_paragraph(

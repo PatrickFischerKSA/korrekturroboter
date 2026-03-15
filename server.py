@@ -10,9 +10,11 @@ from urllib.parse import urlparse
 
 from docx_pipeline import build_reviewed_docx, read_docx_paragraphs, read_reference_paragraphs
 from review_engine import (
+    LANGUAGETOOL_BASE_URL,
     LM_STUDIO_BASE_URL,
     LMStudioHTTPError,
     ReviewError,
+    check_languagetool_health,
     fetch_model,
     infer_context_from_dossier,
     list_models,
@@ -25,7 +27,7 @@ STATIC_DIR = ROOT_DIR / "static"
 HOST = os.environ.get("KORREKTURROBOTER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("KORREKTURROBOTER_PORT", "8090"))
 ALLOWED_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-PRIVACY_NOTICE = "Datenschutzmodus aktiv: Der Dienst arbeitet ausschließlich mit lokalem LM Studio auf localhost."
+PRIVACY_NOTICE = "Datenschutzmodus aktiv: Der Dienst arbeitet ausschließlich mit lokalem LM Studio und lokalem LanguageTool auf localhost."
 
 
 class KorrekturHandler(SimpleHTTPRequestHandler):
@@ -67,16 +69,32 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
 
     def _handle_health(self) -> None:
         base_url = _strict_local_base_url(LM_STUDIO_BASE_URL)
+        lt_base_url = _strict_local_base_url(LANGUAGETOOL_BASE_URL)
         try:
             models = [entry.get("id", "") for entry in list_models(base_url) if entry.get("id")]
             if not models:
                 raise ReviewError("LM Studio ist erreichbar, liefert aber keine geladenen Modelle.")
+            lt_payload: dict[str, object]
+            try:
+                lt_health = check_languagetool_health(lt_base_url)
+                lt_payload = {
+                    "ok": True,
+                    "base_url": lt_health["base_url"],
+                    "languages": lt_health["languages"],
+                }
+            except Exception as lt_exc:
+                lt_payload = {
+                    "ok": False,
+                    "base_url": lt_base_url,
+                    "error": str(lt_exc),
+                }
             self._send_json(
                 {
                     "ok": True,
                     "base_url": base_url,
                     "models": models,
                     "selected_model": models[0],
+                    "languagetool": lt_payload,
                     "privacy_notice": PRIVACY_NOTICE,
                 }
             )
@@ -85,6 +103,10 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
                 {
                     "ok": False,
                     "base_url": base_url,
+                    "languagetool": {
+                        "ok": False,
+                        "base_url": lt_base_url,
+                    },
                     "error": str(exc),
                     "privacy_notice": PRIVACY_NOTICE,
                 },
