@@ -3,29 +3,20 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/scripts/runtime_helpers.zsh"
 PORT_FILE="$SCRIPT_DIR/.korrekturroboter.port"
 PID_FILE="$SCRIPT_DIR/.korrekturroboter.pid"
 LOG_FILE="$SCRIPT_DIR/.korrekturroboter.log"
-LT_PID_FILE="$SCRIPT_DIR/.languagetool.pid"
-LT_LOG_FILE="$SCRIPT_DIR/.languagetool.log"
-LT_HOME="$SCRIPT_DIR/vendor/languagetool/LanguageTool"
-LT_JAVA="$SCRIPT_DIR/.lt-java/lib/jvm/bin/java"
 
 start_languagetool_if_available() {
-  if [[ ! -x "$LT_JAVA" || ! -f "$LT_HOME/languagetool-server.jar" ]]; then
+  if [[ ! -f "$SCRIPT_DIR/vendor/languagetool/LanguageTool/languagetool-server.jar" ]]; then
     return 0
   fi
 
-  if [[ -f "$LT_PID_FILE" ]]; then
-    local old_lt_pid
-    old_lt_pid="$(cat "$LT_PID_FILE" 2>/dev/null || true)"
-    if [[ -n "$old_lt_pid" ]] && kill -0 "$old_lt_pid" >/dev/null 2>&1; then
-      return 0
-    fi
-  fi
-
-  nohup "$LT_JAVA" -jar "$LT_HOME/languagetool-server.jar" --port 8081 >"$LT_LOG_FILE" 2>&1 &
-  echo $! >"$LT_PID_FILE"
+  start_languagetool_server || {
+    printf '%s\n' "${LAST_RUNTIME_ERROR:-LanguageTool konnte nicht automatisch gestartet werden.}" >>"$LOG_FILE"
+    return 0
+  }
 }
 
 find_free_port() {

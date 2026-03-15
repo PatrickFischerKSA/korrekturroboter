@@ -44,6 +44,10 @@ python3 server.py
 
 Die Anwendung nimmt ein `.docx` entgegen, analysiert es lokal über LM Studio und erzeugt ein neues Word-Dokument mit roten Fehlermarkierungen, textbezogenen Kommentaren und ausführlichem Gesamtfeedback.
 
+Für die Einrichtung auf einem zweiten Mac gibt es jetzt eine eigene Anleitung:
+
+- [INSTALLATION.md](/Users/patrickfischer/Documents/New%20project/korrekturroboter/INSTALLATION.md)
+
 ## Was das Repo leistet
 
 - Upload eines `.docx`-Aufsatzes über die Weboberfläche

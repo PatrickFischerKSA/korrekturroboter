@@ -8,6 +8,7 @@ __pycache__/
 .korrekturroboter.port
 .languagetool.log
 .languagetool.pid
+.runtime-bootstrap.log
 
 # Lokale Java-Laufzeit nur fuer den eigenen Mac
 .lt-java/
