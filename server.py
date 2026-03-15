@@ -103,6 +103,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
             thesis = str(payload.get("thesis", "")).strip()
             assignment_text = str(payload.get("assignment_text", "")).strip()
             gym_level = str(payload.get("gym_level", "1"))
+            school_mode = bool(payload.get("school_mode", False))
             requested_base_url = str(payload.get("base_url", "")).strip()
             base_url = _strict_local_base_url(LM_STUDIO_BASE_URL)
             model_name = str(payload.get("model", "")).strip() or None
@@ -114,7 +115,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
 
             raw_document = base64.b64decode(document_base64)
             paragraphs = read_docx_paragraphs(raw_document)
-            dossier_context = self._read_dossier_context(dossier_name, dossier_base64, paragraphs)
+            dossier_context = self._read_dossier_context(dossier_name, dossier_base64, paragraphs, school_mode=school_mode)
             if not topic:
                 topic = dossier_context.get("topic", "")
             if not assignment_text:
@@ -130,6 +131,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
                 thesis=thesis,
                 base_url=base_url,
                 model_name=model_name or fetch_model(base_url),
+                school_mode=school_mode,
             )
             review["privacy_notice"] = PRIVACY_NOTICE
             reviewed_docx = build_reviewed_docx(file_name, paragraphs, review)
@@ -160,6 +162,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
             document_base64 = str(payload.get("document_base64", "")).strip()
             dossier_name = str(payload.get("dossier_name", "")).strip()
             dossier_base64 = str(payload.get("dossier_base64", "")).strip()
+            school_mode = bool(payload.get("school_mode", False))
 
             if not document_base64:
                 raise ReviewError("Für die Themen-Erkennung fehlt der Aufsatz.")
@@ -167,7 +170,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
                 raise ReviewError("Für die Themen-Erkennung fehlt das Prüfungsdossier.")
 
             essay_paragraphs = read_docx_paragraphs(base64.b64decode(document_base64))
-            dossier_context = self._read_dossier_context(dossier_name, dossier_base64, essay_paragraphs)
+            dossier_context = self._read_dossier_context(dossier_name, dossier_base64, essay_paragraphs, school_mode=school_mode)
             if not dossier_context.get("topic") and not dossier_context.get("assignment_text"):
                 raise ReviewError("Im Prüfungsdossier konnte kein passendes Thema zum Aufsatz erkannt werden.")
 
@@ -185,12 +188,19 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
         except Exception as exc:
             self._send_json({"ok": False, "error": f"Interner Fehler: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _read_dossier_context(self, dossier_name: str, dossier_base64: str, essay_paragraphs: list[str]) -> dict:
+    def _read_dossier_context(
+        self,
+        dossier_name: str,
+        dossier_base64: str,
+        essay_paragraphs: list[str],
+        *,
+        school_mode: bool = False,
+    ) -> dict:
         if not dossier_base64 or not dossier_name:
             return {}
         dossier_bytes = base64.b64decode(dossier_base64)
         dossier_paragraphs = read_reference_paragraphs(dossier_name, dossier_bytes)
-        return infer_context_from_dossier(essay_paragraphs, dossier_paragraphs)
+        return infer_context_from_dossier(essay_paragraphs, dossier_paragraphs, school_mode=school_mode)
 
     def _read_json(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))

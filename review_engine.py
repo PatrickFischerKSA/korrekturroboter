@@ -11,6 +11,14 @@ LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "").strip()
 DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx"
 MAX_REVIEW_TEXT_CHARS = 9000
 MAX_DOSSIER_SCAN_PARAGRAPHS = 120
+MAX_CHUNK_CHARS = 2400
+MAX_CHUNK_PARAGRAPHS = 4
+SCHOOL_MODE_REVIEW_TEXT_CHARS = 7200
+SCHOOL_MODE_DOSSIER_SCAN_PARAGRAPHS = 80
+SCHOOL_MODE_CHUNK_CHARS = 1800
+SCHOOL_MODE_CHUNK_PARAGRAPHS = 3
+SCHOOL_MODE_STAGE1_MAX_TOKENS = 700
+SCHOOL_MODE_STAGE2_MAX_TOKENS = 1100
 
 
 ESSAY_GUIDELINES = {
@@ -223,6 +231,28 @@ class OrthographyResult:
     grade: float
 
 
+def get_runtime_limits(school_mode: bool) -> dict[str, int]:
+    if school_mode:
+        return {
+            "max_review_text_chars": SCHOOL_MODE_REVIEW_TEXT_CHARS,
+            "max_dossier_scan_paragraphs": SCHOOL_MODE_DOSSIER_SCAN_PARAGRAPHS,
+            "max_chunk_chars": SCHOOL_MODE_CHUNK_CHARS,
+            "max_chunk_paragraphs": SCHOOL_MODE_CHUNK_PARAGRAPHS,
+            "stage1_max_tokens": SCHOOL_MODE_STAGE1_MAX_TOKENS,
+            "stage2_max_tokens": SCHOOL_MODE_STAGE2_MAX_TOKENS,
+            "combined_token_warning": 3000,
+        }
+    return {
+        "max_review_text_chars": MAX_REVIEW_TEXT_CHARS,
+        "max_dossier_scan_paragraphs": MAX_DOSSIER_SCAN_PARAGRAPHS,
+        "max_chunk_chars": MAX_CHUNK_CHARS,
+        "max_chunk_paragraphs": MAX_CHUNK_PARAGRAPHS,
+        "stage1_max_tokens": 900,
+        "stage2_max_tokens": 1400,
+        "combined_token_warning": 3500,
+    }
+
+
 def count_words(text: str) -> int:
     return len(re.findall(r"[A-Za-zA-ÖØ-öø-ÿÄÖÜäöüß]+", text))
 
@@ -270,11 +300,16 @@ def detect_document_type(text: str, requested_type: str, assignment_text: str = 
     return "essay"
 
 
-def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: list[str]) -> dict[str, Any]:
+def infer_context_from_dossier(
+    essay_paragraphs: list[str],
+    dossier_paragraphs: list[str],
+    school_mode: bool = False,
+) -> dict[str, Any]:
     essay_text = "\n".join(essay_paragraphs).strip()
-    dossier_scan = dossier_paragraphs[:MAX_DOSSIER_SCAN_PARAGRAPHS]
+    limits = get_runtime_limits(school_mode)
+    dossier_scan = dossier_paragraphs[: limits["max_dossier_scan_paragraphs"]]
     dossier_text = "\n".join(dossier_scan).strip()
-    warnings = build_input_warnings(essay_paragraphs, dossier_paragraphs=dossier_paragraphs)
+    warnings = build_input_warnings(essay_paragraphs, dossier_paragraphs=dossier_paragraphs, school_mode=school_mode)
     if not essay_text or not dossier_text:
         return {
             "topic": "",
@@ -351,12 +386,12 @@ def infer_context_from_dossier(essay_paragraphs: list[str], dossier_paragraphs: 
         "match_label": f"Thema aus Prüfungsdossier erkannt (Trefferwert {best_score}).",
         "candidates": normalized_candidates,
         "warnings": warnings,
-        "pipeline": {
-            "mode": "two_stage_local",
-            "stage_1": f"{len(candidates)} Themenblöcke aus dem Prüfungsdossier extrahiert.",
-            "stage_2": f"Bester Themenblock mit Trefferwert {best_score} zum Aufsatz abgeglichen.",
-        },
-    }
+            "pipeline": {
+                "mode": "two_stage_local",
+                "stage_1": f"{len(candidates)} Themenblöcke aus dem Prüfungsdossier extrahiert.",
+                "stage_2": f"Bester Themenblock mit Trefferwert {best_score} zum Aufsatz abgeglichen.",
+            },
+        }
 
 
 def _build_dossier_candidates(paragraphs: list[str]) -> list[dict[str, str]]:
@@ -473,23 +508,29 @@ def build_input_warnings(
     assignment_text: str = "",
     topic: str = "",
     thesis: str = "",
+    school_mode: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
+    limits = get_runtime_limits(school_mode)
     essay_text = "\n\n".join(essay_paragraphs).strip()
     dossier_text = "\n\n".join(dossier_paragraphs or []).strip()
 
-    if len(essay_text) > MAX_REVIEW_TEXT_CHARS:
+    if school_mode:
+        warnings.append(
+            "Schulmodus aktiv: Das System arbeitet mit stabilen Standardgrenzen und einem festen lokalen Modellprofil."
+        )
+    if len(essay_text) > limits["max_review_text_chars"]:
         warnings.append(
             "Der Aufsatz ist sehr lang. Für die KI-Bewertung wird bei lokalen Modellen ein gekürzter Analyseauszug verwendet, "
             "damit der Lauf stabil bleibt."
         )
-    if dossier_paragraphs and len(dossier_paragraphs) > MAX_DOSSIER_SCAN_PARAGRAPHS:
+    if dossier_paragraphs and len(dossier_paragraphs) > limits["max_dossier_scan_paragraphs"]:
         warnings.append(
-            f"Das Prüfungsdossier ist umfangreich. Die Dossieranalyse nutzt deshalb nur die ersten {MAX_DOSSIER_SCAN_PARAGRAPHS} Absätze "
+            f"Das Prüfungsdossier ist umfangreich. Die Dossieranalyse nutzt deshalb nur die ersten {limits['max_dossier_scan_paragraphs']} Absätze "
             "für die automatische Themenwahl."
         )
     combined_tokens = estimate_tokens(essay_text) + estimate_tokens(dossier_text) + estimate_tokens(assignment_text) + estimate_tokens(topic) + estimate_tokens(thesis)
-    if combined_tokens > 3500:
+    if combined_tokens > limits["combined_token_warning"]:
         warnings.append(
             "Die Gesamteingabe ist für kleinere lokale Modelle sehr umfangreich. Ein Modell mit größerem Kontextfenster bleibt hier robuster."
         )
@@ -611,6 +652,98 @@ def build_prompt(
         ]
     )
 
+    return system_prompt, user_prompt
+
+
+def build_stage1_prompt(
+    chunk_text: str,
+    document_type: str,
+    chunk_index: int,
+    chunk_count: int,
+    gym_level: str,
+    assignment_text: str = "",
+    topic: str = "",
+    thesis: str = "",
+) -> tuple[str, str]:
+    rubric = FORM_GUIDELINES[document_type]
+    type_label = FORM_LABELS[document_type]
+    assignment_text = _shorten_context_text(assignment_text, 320)
+    topic = _shorten_context_text(topic, 140)
+    thesis = _shorten_context_text(thesis, 160)
+
+    system_prompt = (
+        "Du analysierst einen Teil eines deutschsprachigen Maturaufsatzes. "
+        "Antworte nur mit gültigem JSON in knapper Form."
+    )
+    user_prompt = "\n".join(
+        [
+            f"Dokumenttyp: {type_label}",
+            f"Teilabschnitt: {chunk_index + 1} von {chunk_count}",
+            f"Thema: {topic or 'nicht vorgegeben'}",
+            f"Leitfrage/These: {thesis or 'nicht vorgegeben'}",
+            f"Aufgabenstellung: {assignment_text or 'nicht vorgegeben'}",
+            f"Gym-Stufe: {gym_level}",
+            f"Inhalt-Fokus: {'; '.join(rubric['inhalt'][:4])}",
+            f"Aufbau-Fokus: {'; '.join(rubric['aufbau'][:4])}",
+            f"Ausdruck-Fokus: {'; '.join(rubric['ausdruck'][:4])}",
+            "Gib genau dieses JSON zurück:",
+            '{"chunk_summary":"1-2 Sätze","criteria_signals":{"inhalt":{"score":4.5,"evidence":"..."}, "aufbau":{"score":4.5,"evidence":"..."}, "ausdruck":{"score":4.5,"evidence":"..."}},"annotations":[{"paragraph_index":0,"snippet":"...","category":"inhalt|aufbau|ausdruck|rhetorik","action":"kommentieren|ueberarbeiten","comment":"...","suggestion":"..."}],"language_errors":[{"paragraph_index":0,"snippet":"...","category":"grammatik|rechtschreibung","comment":"...","suggestion":"..."}]}',
+            "Maximal 4 annotations und maximal 12 language_errors.",
+            "Abschnitt:",
+            chunk_text,
+        ]
+    )
+    return system_prompt, user_prompt
+
+
+def build_stage2_prompt(
+    document_type: str,
+    gym_level: str,
+    assignment_text: str = "",
+    topic: str = "",
+    thesis: str = "",
+    chunk_summaries: list[str] | None = None,
+    criteria_signals: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, str]:
+    rubric = FORM_GUIDELINES[document_type]
+    type_label = FORM_LABELS[document_type]
+    structure_notes = DISCUSSION_STRUCTURE_NOTES.get(document_type, [])
+    assignment_text = _shorten_context_text(assignment_text, 320)
+    topic = _shorten_context_text(topic, 140)
+    thesis = _shorten_context_text(thesis, 160)
+    chunk_summaries = chunk_summaries or []
+    criteria_signals = criteria_signals or {}
+
+    signal_lines = []
+    for key in ("inhalt", "aufbau", "ausdruck"):
+        entry = criteria_signals.get(key, {})
+        score = entry.get("score", 4.0)
+        evidence = _shorten_context_text(str(entry.get("evidence", "")), 280)
+        signal_lines.append(f"{key}: Teilnote {score:.2f}; Hinweise {evidence or 'keine'}")
+
+    system_prompt = (
+        "Du erstellst das Gesamtfeedback eines deutschsprachigen Maturaufsatzes aus bereits vorbereiteten Teilanalysen. "
+        "Antworte nur mit gültigem JSON."
+    )
+    user_prompt = "\n".join(
+        [
+            f"Dokumenttyp: {type_label}",
+            f"Thema: {topic or 'nicht vorgegeben'}",
+            f"Leitfrage/These: {thesis or 'nicht vorgegeben'}",
+            f"Aufgabenstellung: {assignment_text or 'nicht vorgegeben'}",
+            f"Gym-Stufe: {gym_level}",
+            f"Kriterium Inhalt: {'; '.join(rubric['inhalt'][:5])}",
+            f"Kriterium Aufbau: {'; '.join(rubric['aufbau'][:5])}",
+            f"Kriterium Ausdruck: {'; '.join(rubric['ausdruck'][:5])}",
+            f"Formhinweise: {'; '.join(structure_notes[:3]) if structure_notes else 'keine'}",
+            "Teilanalysen:",
+            *[f"- {summary}" for summary in chunk_summaries[:8]],
+            "Verdichtete Hinweise:",
+            *signal_lines,
+            "Gib genau dieses JSON zurück:",
+            '{"document_type":"essay|speech|linear_discussion|dialectical_discussion","summary":"2-4 Sätze","criteria_comments":{"inhalt":{"score":4.5,"comment":"..."}, "aufbau":{"score":4.5,"comment":"..."}, "ausdruck":{"score":4.5,"comment":"..."}}}',
+        ]
+    )
     return system_prompt, user_prompt
 
 
@@ -741,6 +874,143 @@ def normalize_review(
     }
 
 
+def _call_model_json(
+    base_url: str,
+    model_name: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+) -> dict[str, Any]:
+    payload = _http_post_json(
+        f"{base_url}/chat/completions",
+        {
+            "model": model_name,
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        },
+        timeout=180,
+    )
+    content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+    return parse_json_response(content)
+
+
+def _select_review_paragraphs(paragraphs: list[str], max_chars: int) -> tuple[list[str], bool]:
+    selected: list[str] = []
+    total = 0
+    for paragraph in paragraphs:
+        addition = len(paragraph) + 2
+        if selected and total + addition > max_chars:
+            break
+        selected.append(paragraph)
+        total += addition
+    return selected or paragraphs[:1], len(selected) < len(paragraphs)
+
+
+def _chunk_paragraphs(
+    paragraphs: list[str],
+    *,
+    max_chunk_chars: int,
+    max_chunk_paragraphs: int,
+) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    current: list[tuple[int, str]] = []
+    current_chars = 0
+
+    for index, paragraph in enumerate(paragraphs):
+        addition = len(paragraph) + 2
+        if current and (len(current) >= max_chunk_paragraphs or current_chars + addition > max_chunk_chars):
+            chunks.append(
+                {
+                    "start_index": current[0][0],
+                    "end_index": current[-1][0],
+                    "paragraphs": [value for _, value in current],
+                    "text": "\n\n".join(value for _, value in current),
+                }
+            )
+            current = []
+            current_chars = 0
+
+        current.append((index, paragraph))
+        current_chars += addition
+
+    if current:
+        chunks.append(
+            {
+                "start_index": current[0][0],
+                "end_index": current[-1][0],
+                "paragraphs": [value for _, value in current],
+                "text": "\n\n".join(value for _, value in current),
+            }
+        )
+    return chunks
+
+
+def _aggregate_chunk_results(chunk_results: list[dict[str, Any]]) -> dict[str, Any]:
+    summaries: list[str] = []
+    annotations: list[dict[str, Any]] = []
+    language_errors: list[dict[str, Any]] = []
+    criteria_signals: dict[str, dict[str, Any]] = {
+        "inhalt": {"scores": [], "evidence": []},
+        "aufbau": {"scores": [], "evidence": []},
+        "ausdruck": {"scores": [], "evidence": []},
+    }
+    section_reports: list[dict[str, Any]] = []
+
+    for index, result in enumerate(chunk_results):
+        summary = normalize_sentence(result.get("chunk_summary", ""))
+        if summary:
+            summaries.append(summary)
+
+        raw_signals = result.get("criteria_signals", {}) or {}
+        section_signal_map: dict[str, dict[str, Any]] = {}
+        for key in ("inhalt", "aufbau", "ausdruck"):
+            entry = raw_signals.get(key, {}) if isinstance(raw_signals, dict) else {}
+            score = clamp_score(entry.get("score"), fallback=4.0)
+            criteria_signals[key]["scores"].append(score)
+            evidence = normalize_sentence(entry.get("evidence", ""))
+            if evidence:
+                criteria_signals[key]["evidence"].append(evidence)
+            section_signal_map[key] = {
+                "score": score,
+                "evidence": evidence,
+            }
+
+        annotations.extend(result.get("annotations", []) or [])
+        language_errors.extend(result.get("language_errors", []) or [])
+        start_index = int(result.get("start_index", 0))
+        end_index = int(result.get("end_index", start_index))
+        section_reports.append(
+            {
+                "label": f"Abschnitt {index + 1}",
+                "range_label": f"Absätze {start_index + 1}–{end_index + 1}" if end_index > start_index else f"Absatz {start_index + 1}",
+                "summary": summary or "Für diesen Abschnitt liegt keine Verdichtung vor.",
+                "criteria_signals": section_signal_map,
+                "annotation_count": len(result.get("annotations", []) or []),
+                "language_error_count": len(result.get("language_errors", []) or []),
+            }
+        )
+
+    aggregated_signals = {}
+    for key, value in criteria_signals.items():
+        scores = value["scores"] or [4.0]
+        aggregated_signals[key] = {
+            "score": round(sum(scores) / len(scores), 2),
+            "evidence": " ".join(value["evidence"][:4]),
+        }
+
+    return {
+        "chunk_summaries": summaries,
+        "criteria_signals": aggregated_signals,
+        "annotations": annotations,
+        "language_errors": language_errors,
+        "section_reports": section_reports,
+    }
+
+
 def run_review(
     paragraphs: list[str],
     requested_type: str,
@@ -750,51 +1020,91 @@ def run_review(
     thesis: str = "",
     base_url: str | None = None,
     model_name: str | None = None,
+    school_mode: bool = False,
 ) -> dict[str, Any]:
     full_text = "\n\n".join(paragraphs).strip()
     if not full_text:
         raise ReviewError("Das Word-Dokument enthält keinen auswertbaren Text.")
+    limits = get_runtime_limits(school_mode)
+    review_paragraphs, was_trimmed = _select_review_paragraphs(paragraphs, limits["max_review_text_chars"])
     review_warnings = build_input_warnings(
-        paragraphs,
+        review_paragraphs,
         assignment_text=assignment_text,
         topic=topic,
         thesis=thesis,
+        school_mode=school_mode,
     )
+    if was_trimmed:
+        review_warnings.append(
+            "Für die eigentliche KI-Korrektur wurde nur der erste Teil des Aufsatzes analysiert, "
+            "weil das aktuelle lokale Modell sonst instabil würde."
+        )
 
     base_url = (base_url or LM_STUDIO_BASE_URL).rstrip("/")
     model_name = model_name or fetch_model(base_url)
-    detected_type = detect_document_type(full_text, requested_type, assignment_text, topic)
-    system_prompt, user_prompt = build_prompt(
-        full_text,
+    detected_type = detect_document_type("\n\n".join(review_paragraphs), requested_type, assignment_text, topic)
+    chunks = _chunk_paragraphs(
+        review_paragraphs,
+        max_chunk_chars=limits["max_chunk_chars"],
+        max_chunk_paragraphs=limits["max_chunk_paragraphs"],
+    )
+    chunk_results = []
+    for index, chunk in enumerate(chunks):
+        stage1_system, stage1_user = build_stage1_prompt(
+            chunk["text"],
+            detected_type,
+            index,
+            len(chunks),
+            gym_level,
+            assignment_text=assignment_text,
+            topic=topic,
+            thesis=thesis,
+        )
+        chunk_result = _call_model_json(
+            base_url,
+            model_name,
+            stage1_system,
+            stage1_user,
+            max_tokens=limits["stage1_max_tokens"],
+        )
+        for field_name in ("annotations", "language_errors"):
+            for item in chunk_result.get(field_name, []) or []:
+                try:
+                    item["paragraph_index"] = int(item.get("paragraph_index", 0)) + int(chunk["start_index"])
+                except (TypeError, ValueError):
+                    item["paragraph_index"] = int(chunk["start_index"])
+        chunk_result["start_index"] = chunk["start_index"]
+        chunk_result["end_index"] = chunk["end_index"]
+        chunk_results.append(chunk_result)
+
+    aggregated = _aggregate_chunk_results(chunk_results)
+    stage2_system, stage2_user = build_stage2_prompt(
         detected_type,
-        len(paragraphs),
         gym_level,
         assignment_text=assignment_text,
         topic=topic,
         thesis=thesis,
+        chunk_summaries=aggregated["chunk_summaries"],
+        criteria_signals=aggregated["criteria_signals"],
     )
-    prompt_tokens = estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
+    prompt_tokens = estimate_tokens(stage2_system) + estimate_tokens(stage2_user)
     if prompt_tokens > 3000:
         raise ReviewError(
-            "Der Aufsatz plus Prüfungsdossier ist für das aktuell geladene Modell mit kleinem Kontext zu umfangreich. "
-            "Lade in LM Studio ein Modell mit größerem Kontext oder kürze das Dossier deutlich."
+            "Die verdichtete Gesamtauswertung ist für das aktuelle lokale Modell noch zu umfangreich. "
+            "Bitte nutze ein Modell mit größerem Kontextfenster oder reduziere den Textumfang."
         )
 
-    payload = _http_post_json(
-        f"{base_url}/chat/completions",
-        {
-            "model": model_name,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        },
-        timeout=180,
+    stage2_payload = _call_model_json(
+        base_url,
+        model_name,
+        stage2_system,
+        stage2_user,
+        max_tokens=limits["stage2_max_tokens"],
     )
-    content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+    stage2_payload["annotations"] = aggregated["annotations"]
+    stage2_payload["language_errors"] = aggregated["language_errors"]
     normalized = normalize_review(
-        parse_json_response(content),
+        stage2_payload,
         paragraphs,
         requested_type,
         gym_level,
@@ -805,6 +1115,13 @@ def run_review(
     normalized["model"] = model_name
     normalized["base_url"] = base_url
     normalized["warnings"] = review_warnings
+    normalized["school_mode"] = school_mode
+    normalized["section_reports"] = aggregated["section_reports"]
+    normalized["pipeline"] = {
+        "mode": "two_stage_review",
+        "stage_1": f"{len(chunks)} Abschnittsanalysen mit kompakten Teilprompts erstellt.",
+        "stage_2": "Aus den Teilanalysen wurde ein verdichtetes Gesamtfeedback berechnet.",
+    }
     return normalized
 
 
