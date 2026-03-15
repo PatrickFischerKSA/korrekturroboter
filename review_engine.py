@@ -5,6 +5,16 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
+try:
+    from AppKit import NSSpellChecker
+    from Foundation import NSMakeRange
+
+    MAC_SPELLCHECK_AVAILABLE = True
+except Exception:
+    NSSpellChecker = None
+    NSMakeRange = None
+    MAC_SPELLCHECK_AVAILABLE = False
+
 
 LM_STUDIO_BASE_URL = os.environ.get("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "").strip()
@@ -823,6 +833,127 @@ def normalize_annotations(paragraphs: list[str], items: list[dict[str, Any]], al
     return normalized
 
 
+def merge_language_error_lists(primary: list[dict[str, Any]], extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged = list(primary)
+    seen = {
+        (
+            int(item.get("paragraph_index", -1)),
+            str(item.get("snippet", "")).strip(),
+            str(item.get("category", "")).strip(),
+        )
+        for item in primary
+    }
+    for item in extra:
+        key = (
+            int(item.get("paragraph_index", -1)),
+            str(item.get("snippet", "")).strip(),
+            str(item.get("category", "")).strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def detect_local_language_errors(paragraphs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    warnings: list[str] = []
+    if not MAC_SPELLCHECK_AVAILABLE:
+        warnings.append("Der lokale macOS-Sprachdienst ist auf diesem System nicht verfügbar.")
+        return [], warnings
+
+    errors = []
+    checker = NSSpellChecker.sharedSpellChecker()
+    spell_document_tag = 0
+
+    try:
+        for paragraph_index, paragraph in enumerate(paragraphs):
+            if not paragraph.strip():
+                continue
+            errors.extend(_detect_local_spelling_errors(checker, paragraph, paragraph_index, spell_document_tag))
+            errors.extend(_detect_local_grammar_heuristics(paragraph, paragraph_index))
+    except Exception as exc:
+        warnings.append(f"Die lokale Sprachprüfung konnte nicht vollständig ausgeführt werden: {exc}")
+        return [], warnings
+
+    return errors, warnings
+
+
+def _detect_local_spelling_errors(checker: Any, paragraph: str, paragraph_index: int, spell_document_tag: int) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    start = 0
+    while start < len(paragraph):
+        result, _word_count = checker.checkSpellingOfString_startingAt_language_wrap_inSpellDocumentWithTag_wordCount_(
+            paragraph,
+            start,
+            "de_CH",
+            False,
+            spell_document_tag,
+            None,
+        )
+        if getattr(result, "location", 9223372036854775807) == 9223372036854775807:
+            break
+        location = int(result.location)
+        length = int(result.length)
+        snippet = paragraph[location : location + length]
+        if not snippet.strip():
+            start = location + max(length, 1)
+            continue
+        suggestions = checker.guessesForWordRange_inString_language_inSpellDocumentWithTag_(
+            NSMakeRange(location, length),
+            paragraph,
+            "de_CH",
+            spell_document_tag,
+        ) or []
+        suggestion = str(suggestions[0]).strip() if suggestions else ""
+        errors.append(
+            {
+                "paragraph_index": paragraph_index,
+                "snippet": snippet,
+                "category": "rechtschreibung",
+                "comment": f"Das Wort wirkt orthografisch fehlerhaft oder ist in dieser Form im lokalen Wörterbuch nicht belegt.",
+                "suggestion": suggestion or "Schreibweise überprüfen",
+            }
+        )
+        start = location + max(length, 1)
+    return errors
+
+
+def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> list[dict[str, Any]]:
+    heuristics = [
+        (r"\bwir\s+ist\b", "wir ist", "grammatik", 'Nach dem Subjekt "wir" braucht es eine Verbform im Plural.', "wir sind"),
+        (r"\bwir\s+hat\b", "wir hat", "grammatik", 'Nach dem Subjekt "wir" braucht es eine Verbform im Plural.', "wir haben"),
+        (r"\bich\s+sind\b", "ich sind", "grammatik", 'Nach dem Subjekt "ich" braucht es eine Verbform im Singular.', "ich bin"),
+        (r"\bich\s+haben\b", "ich haben", "grammatik", 'Nach dem Subjekt "ich" braucht es eine Verbform im Singular.', "ich habe"),
+        (r"\bdu\s+ist\b", "du ist", "grammatik", 'Nach dem Subjekt "du" braucht es eine passende Verbform.', "du bist"),
+        (r"\bdu\s+haben\b", "du haben", "grammatik", 'Nach dem Subjekt "du" braucht es eine passende Verbform.', "du hast"),
+        (r"\bman\s+sind\b", "man sind", "grammatik", 'Nach dem unpersönlichen Subjekt "man" steht die Verbform im Singular.', "man ist"),
+        (r"\bman\s+haben\b", "man haben", "grammatik", 'Nach dem unpersönlichen Subjekt "man" steht die Verbform im Singular.', "man hat"),
+    ]
+    findings: list[dict[str, Any]] = []
+    lowered = paragraph.lower()
+    for pattern, snippet, category, comment, suggestion in heuristics:
+        if re.search(pattern, lowered):
+            original_snippet = _find_original_snippet(paragraph, snippet)
+            findings.append(
+                {
+                    "paragraph_index": paragraph_index,
+                    "snippet": original_snippet,
+                    "category": category,
+                    "comment": comment,
+                    "suggestion": suggestion,
+                }
+            )
+    return findings
+
+
+def _find_original_snippet(paragraph: str, lowered_snippet: str) -> str:
+    match = re.search(re.escape(lowered_snippet), paragraph, flags=re.IGNORECASE)
+    if not match:
+        return lowered_snippet
+    return paragraph[match.start() : match.end()]
+
+
 def normalize_sentence(value: Any) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
@@ -840,6 +971,7 @@ def normalize_review(
     assignment_text: str = "",
     topic: str = "",
     thesis: str = "",
+    review_warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     full_text = "\n\n".join(paragraphs)
     word_count = count_words(full_text)
@@ -856,8 +988,14 @@ def normalize_review(
         }
 
     language_errors = normalize_annotations(paragraphs, raw_payload.get("language_errors", []), {"grammatik", "rechtschreibung"})
+    local_language_errors, local_warnings = detect_local_language_errors(paragraphs)
+    if review_warnings is not None:
+        review_warnings.extend(local_warnings)
+    language_errors = merge_language_error_lists(language_errors, local_language_errors)
     annotations = normalize_annotations(paragraphs, raw_payload.get("annotations", []), {"inhalt", "aufbau", "ausdruck", "rhetorik"})
     orthography = calculate_orthography_grade(gym_level, len(language_errors), word_count)
+    local_rights = sum(1 for item in language_errors if item.get("category") == "rechtschreibung")
+    local_grammar = sum(1 for item in language_errors if item.get("category") == "grammatik")
 
     return {
         "document_type": document_type,
@@ -879,7 +1017,9 @@ def normalize_review(
                 f"Für das vierte Kriterium wurden ausschließlich Grammatik- und Rechtschreibfehler gezählt. "
                 f"Bei {orthography.error_count} relevanten Fehlern in {orthography.word_count} Wörtern ergibt sich "
                 f"eine Fehlerdichte von {orthography.errors_per_200:.2f} Fehlern pro 200 Wörter und damit "
-                f"eine Teilnote von {orthography.grade:.2f}."
+                f"eine Teilnote von {orthography.grade:.2f}. "
+                f"Die Zählung stützt sich lokal auf den macOS-Sprachdienst für Rechtschreibung und auf ergänzende Grammatiktreffer aus Heuristik bzw. Modellanalyse. "
+                f"Erfasst wurden aktuell {local_rights} Rechtschreib- und {local_grammar} Grammatiktreffer."
             ),
         },
     }
@@ -1240,6 +1380,7 @@ def run_review(
         assignment_text=assignment_text,
         topic=topic,
         thesis=thesis,
+        review_warnings=review_warnings,
     )
     normalized["model"] = model_name
     normalized["base_url"] = base_url
