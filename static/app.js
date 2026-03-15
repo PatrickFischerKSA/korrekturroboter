@@ -467,11 +467,20 @@ function renderResult(review) {
           ${languageErrors
             .map((item) => {
               const label = item.category === "grammatik" ? "Grammatik" : "Rechtschreibung";
+              const sourceLabel =
+                item.source === "languagetool"
+                  ? "LanguageTool"
+                  : item.source === "macos"
+                    ? "macOS"
+                    : item.source === "heuristik"
+                      ? "Heuristik"
+                      : "Quelle offen";
               return `
                 <article class="orthography-item">
                   <div class="orthography-item-head">
                     <span class="candidate-meta">${escapeHtml(label)}</span>
                     <span class="candidate-meta">Absatz ${escapeHtml(String(Number(item.paragraph_index || 0) + 1))}</span>
+                    <span class="candidate-meta">${escapeHtml(sourceLabel)}</span>
                   </div>
                   <p><strong>Textstelle:</strong> ${formatText(item.snippet || "")}</p>
                   <p><strong>Hinweis:</strong> ${formatText(item.comment || "")}</p>

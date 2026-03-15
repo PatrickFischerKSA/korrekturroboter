@@ -822,7 +822,7 @@ def clamp_score(value: Any, fallback: float = 4.0) -> float:
 
 def normalize_annotations(paragraphs: list[str], items: list[dict[str, Any]], allowed_categories: set[str]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
-    seen: set[tuple[int, str, str]] = set()
+    seen: set[tuple[int, str, str, int | None]] = set()
 
     for item in items or []:
         snippet = str(item.get("snippet", "")).strip()
@@ -838,12 +838,24 @@ def normalize_annotations(paragraphs: list[str], items: list[dict[str, Any]], al
         if category not in allowed_categories:
             continue
 
+        try:
+            offset_value = item.get("offset", None)
+            offset = int(offset_value) if offset_value is not None else None
+        except (TypeError, ValueError):
+            offset = None
+
+        try:
+            length_value = item.get("length", None)
+            length = int(length_value) if length_value is not None else len(snippet)
+        except (TypeError, ValueError):
+            length = len(snippet)
+
         if paragraph_index < 0 or paragraph_index >= len(paragraphs):
             paragraph_index = next((idx for idx, paragraph in enumerate(paragraphs) if snippet in paragraph), -1)
         if paragraph_index == -1 or snippet not in paragraphs[paragraph_index]:
             continue
 
-        key = (paragraph_index, snippet, category)
+        key = (paragraph_index, snippet, category, offset)
         if key in seen:
             continue
         seen.add(key)
@@ -856,6 +868,9 @@ def normalize_annotations(paragraphs: list[str], items: list[dict[str, Any]], al
                 "action": str(item.get("action", "kommentieren")).strip().lower() or "kommentieren",
                 "comment": normalize_sentence(item.get("comment", "")),
                 "suggestion": normalize_sentence(item.get("suggestion", "")),
+                "offset": offset,
+                "length": length,
+                "source": str(item.get("source", "")).strip().lower(),
             }
         )
 
@@ -864,25 +879,32 @@ def normalize_annotations(paragraphs: list[str], items: list[dict[str, Any]], al
 
 def merge_language_error_lists(primary: list[dict[str, Any]], extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged = list(primary)
-    seen = {
-        (
-            int(item.get("paragraph_index", -1)),
-            str(item.get("snippet", "")).strip(),
-            str(item.get("category", "")).strip(),
-        )
-        for item in primary
-    }
+    seen = {_language_error_key(item) for item in primary}
     for item in extra:
-        key = (
-            int(item.get("paragraph_index", -1)),
-            str(item.get("snippet", "")).strip(),
-            str(item.get("category", "")).strip(),
-        )
+        key = _language_error_key(item)
         if key in seen:
             continue
         seen.add(key)
         merged.append(item)
     return merged
+
+
+def _language_error_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    paragraph_index = int(item.get("paragraph_index", -1))
+    category = str(item.get("category", "")).strip()
+    snippet = str(item.get("snippet", "")).strip()
+    offset_value = item.get("offset", None)
+    try:
+        offset = int(offset_value) if offset_value is not None else None
+    except (TypeError, ValueError):
+        offset = None
+    try:
+        length = int(item.get("length", len(snippet)))
+    except (TypeError, ValueError):
+        length = len(snippet)
+    if offset is not None and offset >= 0:
+        return (paragraph_index, category, offset, length)
+    return (paragraph_index, category, snippet)
 
 
 def detect_local_language_errors(paragraphs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -949,6 +971,9 @@ def _detect_local_spelling_errors(checker: Any, paragraph: str, paragraph_index:
                 "category": "rechtschreibung",
                 "comment": f"Das Wort wirkt orthografisch fehlerhaft oder ist in dieser Form im lokalen Wörterbuch nicht belegt.",
                 "suggestion": suggestion or "Schreibweise überprüfen",
+                "offset": location,
+                "length": length,
+                "source": "macos",
             }
         )
         start = location + max(length, 1)
@@ -1006,6 +1031,9 @@ def detect_languagetool_errors(paragraphs: list[str], base_url: str | None = Non
                     "category": category,
                     "comment": normalize_sentence(match.get("message", "")),
                     "suggestion": suggestion or "Überprüfen",
+                    "offset": offset,
+                    "length": length,
+                    "source": "languagetool",
                 }
             )
     return errors
@@ -1031,10 +1059,9 @@ def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> li
         (r"\bam meisten optimal\b", "am meisten optimal", "grammatik", 'Superlativ und Verstärkung werden hier unpassend kombiniert.', "optimal"),
     ]
     findings: list[dict[str, Any]] = []
-    lowered = paragraph.lower()
-    for pattern, snippet, category, comment, suggestion in heuristics:
-        if re.search(pattern, lowered):
-            original_snippet = _find_original_snippet(paragraph, snippet)
+    for pattern, _snippet, category, comment, suggestion in heuristics:
+        for match in re.finditer(pattern, paragraph, flags=re.IGNORECASE):
+            original_snippet = paragraph[match.start() : match.end()]
             findings.append(
                 {
                     "paragraph_index": paragraph_index,
@@ -1042,17 +1069,13 @@ def _detect_local_grammar_heuristics(paragraph: str, paragraph_index: int) -> li
                     "category": category,
                     "comment": comment,
                     "suggestion": suggestion,
+                    "offset": match.start(),
+                    "length": match.end() - match.start(),
+                    "source": "heuristik",
                 }
             )
     findings.extend(_detect_sentence_start_lowercase(paragraph, paragraph_index))
     return findings
-
-
-def _find_original_snippet(paragraph: str, lowered_snippet: str) -> str:
-    match = re.search(re.escape(lowered_snippet), paragraph, flags=re.IGNORECASE)
-    if not match:
-        return lowered_snippet
-    return paragraph[match.start() : match.end()]
 
 
 def _detect_sentence_start_lowercase(paragraph: str, paragraph_index: int) -> list[dict[str, Any]]:
@@ -1066,6 +1089,9 @@ def _detect_sentence_start_lowercase(paragraph: str, paragraph_index: int) -> li
                 "category": "rechtschreibung",
                 "comment": "Nach einem Satzschluss sollte das nächste Wort mit einem Grossbuchstaben beginnen.",
                 "suggestion": snippet[:1].upper() + snippet[1:],
+                "offset": match.start(1),
+                "length": len(snippet),
+                "source": "heuristik",
             }
         )
     return findings

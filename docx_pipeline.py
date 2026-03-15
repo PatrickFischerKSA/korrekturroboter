@@ -377,9 +377,18 @@ def _build_document_xml(source_name: str, paragraphs: list[str], review: dict, p
         for item in language_errors:
             category = "Grammatik" if item.get("category") == "grammatik" else "Rechtschreibung"
             paragraph_number = int(item.get("paragraph_index", 0)) + 1
+            source = str(item.get("source", "")).strip().lower()
+            if source == "languagetool":
+                source_label = "LanguageTool"
+            elif source == "macos":
+                source_label = "macOS"
+            elif source == "heuristik":
+                source_label = "Heuristik"
+            else:
+                source_label = "nicht angegeben"
             _append_plain_paragraph(
                 body,
-                f"{category}, Absatz {paragraph_number}: {item.get('snippet', '')} | "
+                f"{category}, Absatz {paragraph_number}, Quelle {source_label}: {item.get('snippet', '')} | "
                 f"Hinweis: {item.get('comment', '')} | Vorschlag: {item.get('suggestion', '')}",
             )
 
