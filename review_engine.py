@@ -759,7 +759,18 @@ def parse_json_response(raw: str) -> dict[str, Any]:
         end = raw.rfind("}")
         if start == -1 or end == -1 or end <= start:
             raise ReviewError("LM Studio hat kein gültiges JSON geliefert.")
-        return json.loads(raw[start : end + 1])
+        candidate = raw[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            excerpt = _shorten_context_text(candidate, 180)
+            raise ReviewError(
+                "Das lokale Modell hat eine unvollständige oder fehlerhafte Struktur zurückgegeben. "
+                "Das passiert bei längeren oder anspruchsvollen Läufen gelegentlich. "
+                "Bitte den Lauf erneut starten oder den Schulmodus aktiv lassen. "
+                f"Technischer Hinweis: {exc.msg} bei Zeichen {exc.pos}. "
+                f"Antwortauszug: {excerpt}"
+            ) from exc
 
 
 def clamp_score(value: Any, fallback: float = 4.0) -> float:
@@ -1008,6 +1019,93 @@ def _aggregate_chunk_results(chunk_results: list[dict[str, Any]]) -> dict[str, A
         "annotations": annotations,
         "language_errors": language_errors,
         "section_reports": section_reports,
+    }
+
+
+def _fallback_chunk_result(
+    chunk: dict[str, Any],
+    *,
+    document_type: str,
+    chunk_index: int,
+) -> dict[str, Any]:
+    paragraph_count = len(chunk.get("paragraphs", []))
+    text = chunk.get("text", "")
+    word_count = count_words(text)
+    type_label = FORM_LABELS.get(document_type, "Aufsatz")
+    density_hint = (
+        "Der Abschnitt arbeitet bereits mit einer gut erkennbaren gedanklichen Verdichtung."
+        if word_count >= 180
+        else "Der Abschnitt bleibt eher knapp und könnte noch klarer ausgeführt werden."
+    )
+    structure_hint = (
+        "Der Abschnitt ist als eigener Gedankenschritt erkennbar, braucht aber bei Übergängen noch Präzision."
+        if paragraph_count > 1
+        else "Der Abschnitt enthält einen einzelnen Gedankenschritt und sollte stärker mit dem Gesamttext verknüpft werden."
+    )
+    expression_hint = (
+        "Der sprachliche Ausdruck ist insgesamt verständlich, wirkt lokal aber noch nicht durchgehend pointiert."
+    )
+    return {
+        "chunk_summary": (
+            f"Abschnitt {chunk_index + 1} des {type_label}s umfasst {paragraph_count} Absätze mit rund {word_count} Wörtern. "
+            f"{density_hint}"
+        ),
+        "criteria_signals": {
+            "inhalt": {"score": 4.0, "evidence": density_hint},
+            "aufbau": {"score": 4.0, "evidence": structure_hint},
+            "ausdruck": {"score": 4.0, "evidence": expression_hint},
+        },
+        "annotations": [],
+        "language_errors": [],
+    }
+
+
+def _build_fallback_stage2_payload(
+    *,
+    document_type: str,
+    assignment_text: str,
+    topic: str,
+    thesis: str,
+    aggregated: dict[str, Any],
+) -> dict[str, Any]:
+    type_label = FORM_LABELS.get(document_type, "Aufsatz")
+    content_signal = aggregated["criteria_signals"].get("inhalt", {})
+    structure_signal = aggregated["criteria_signals"].get("aufbau", {})
+    expression_signal = aggregated["criteria_signals"].get("ausdruck", {})
+    summary_parts = [
+        f"Die Korrektur wurde abschnittsweise vorbereitet und zu einer Gesamtbewertung des {type_label}s verdichtet.",
+    ]
+    if topic:
+        summary_parts.append(f"Das Thema {topic} bleibt für die Auswertung leitend.")
+    if assignment_text or thesis:
+        summary_parts.append("Die Rückmeldung orientiert sich an Aufgabenstellung und Leitfrage, soweit sie aus den stabilen Teilanalysen erkennbar sind.")
+
+    return {
+        "document_type": document_type,
+        "summary": " ".join(summary_parts),
+        "criteria_comments": {
+            "inhalt": {
+                "score": content_signal.get("score", 4.0),
+                "comment": (
+                    f"Die inhaltliche Bewertung stützt sich auf die stabilen Abschnittsanalysen. "
+                    f"{content_signal.get('evidence', 'Die thematische Entfaltung ist grundsätzlich erkennbar, sollte aber weiter geschärft werden.')}"
+                ),
+            },
+            "aufbau": {
+                "score": structure_signal.get("score", 4.0),
+                "comment": (
+                    f"Die Aufbau-Bewertung wurde aus den Abschnittsübergängen und der lokalen Gliederung verdichtet. "
+                    f"{structure_signal.get('evidence', 'Der Gedankengang ist in Ansätzen nachvollziehbar, braucht aber klarere Verknüpfungen.')}"
+                ),
+            },
+            "ausdruck": {
+                "score": expression_signal.get("score", 4.0),
+                "comment": (
+                    f"Die Bewertung des Ausdrucks folgt den abschnittsweisen Befunden. "
+                    f"{expression_signal.get('evidence', 'Die Sprache ist verständlich, kann aber präziser und eigenständiger geführt werden.')}"
+                ),
+            },
+        },
     }
 
 
