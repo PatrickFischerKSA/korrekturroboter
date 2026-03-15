@@ -44,6 +44,7 @@ let dossierCandidates = [];
 let confirmedDossierIndex = -1;
 let dossierConfirmationRequired = false;
 const PENDING_FILE_KEY = "korrekturroboter_pending_file";
+const DEFAULT_MODEL_ID = "mistral-small-3.2-24b-instruct-2506-mlx";
 
 const FORM_GUIDES = {
   auto: {
@@ -125,6 +126,7 @@ elements.dossierUploadBox.addEventListener("dragleave", handleDossierDragLeave);
 elements.dossierUploadBox.addEventListener("drop", handleDossierDrop);
 
 syncFormGuide();
+elements.model.value = DEFAULT_MODEL_ID;
 updateReviewButtonState();
 restorePendingFile();
 
@@ -555,7 +557,7 @@ function resetFormState() {
   elements.assignmentWrap.classList.add("hidden");
   elements.assignmentToggle.textContent = "Aufgabenstellung eingeben";
   elements.gymLevel.value = "1";
-  elements.model.value = "";
+  elements.model.value = DEFAULT_MODEL_ID;
   elements.fileStatus.textContent = "Noch keine Datei geladen.";
   elements.fileStatus.className = "status";
   elements.dossierStatus.textContent = "Noch kein Prüfungsdossier geladen.";

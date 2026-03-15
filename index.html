@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="de-CH">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Korrekturroboter Start</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Startseite . Lokal . Datenschutzmodus</p>
+        <h1>Korrekturroboter lokal starten</h1>
+        <p class="lede">
+          Diese lokale Startseite ist der Einstieg in die Plattform. Von hier aus öffnest du die
+          Korrekturansicht, prüfst LM Studio und siehst sofort, ob der Datenschutzmodus aktiv ist.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Start</h2>
+          <p>Die Plattform läuft nur lokal und nutzt ausschließlich dein lokales LM Studio.</p>
+        </div>
+
+        <div class="start-grid">
+          <article class="start-card">
+            <h3>Plattform öffnen</h3>
+            <p>Wechsle direkt zur Korrekturplattform für Upload, Bewertung und DOCX-Export.</p>
+            <a class="button-link primary" href="/plattform.html">Korrekturplattform öffnen</a>
+          </article>
+
+          <article class="start-card">
+            <h3>Eigene Datei laden</h3>
+            <p>Lade hier direkt ein eigenes `.docx` und springe danach sofort in die Plattform.</p>
+            <label class="button-link primary start-upload" for="startDocxFile">Datei laden und Plattform öffnen</label>
+            <input id="startDocxFile" class="visually-hidden" type="file" accept=".docx" />
+          </article>
+
+          <article class="start-card">
+            <h3>Demo-Modus</h3>
+            <p>Öffne die Plattform mit einem vorbereiteten Beispieldokument und teste den Ablauf sofort.</p>
+            <button id="demoButton" class="ghost" type="button">Demo-Dokument öffnen</button>
+          </article>
+
+          <article class="start-card">
+            <h3>Systemstatus</h3>
+            <p>Prüfe, ob lokales LM Studio erreichbar ist und ein Modell bereitsteht.</p>
+            <button id="healthButton" class="ghost" type="button">Lokales LM Studio prüfen</button>
+          </article>
+        </div>
+
+        <div id="privacyBox" class="status ok">
+          Datenschutzmodus aktiv: Der Dienst arbeitet ausschließlich mit lokalem LM Studio auf localhost.
+        </div>
+        <div id="startStatus" class="status">Bereit.</div>
+        <div id="healthBox" class="health">Bereit.</div>
+      </section>
+    </main>
+
+    <script>
+      const startDocxFile = document.getElementById("startDocxFile");
+      const demoButton = document.getElementById("demoButton");
+      const startStatus = document.getElementById("startStatus");
+      const healthButton = document.getElementById("healthButton");
+      const healthBox = document.getElementById("healthBox");
+
+      startDocxFile.addEventListener("change", async (event) => {
+        const [file] = event.target.files || [];
+        if (!file) {
+          return;
+        }
+        if (!file.name.toLowerCase().endsWith(".docx")) {
+          startStatus.textContent = "Ungültige Datei: Bitte ein DOCX-Dokument wählen.";
+          startStatus.className = "status error";
+          return;
+        }
+        startStatus.textContent = "Datei wird vorbereitet und an die Plattform übergeben ...";
+        startStatus.className = "status";
+        try {
+          const base64 = await readFileAsBase64(file);
+          sessionStorage.setItem(
+            "korrekturroboter_pending_file",
+            JSON.stringify({
+              name: file.name,
+              type: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              size: file.size,
+              base64,
+            })
+          );
+          window.location.href = "/plattform.html";
+        } catch (error) {
+          startStatus.textContent = error.message;
+          startStatus.className = "status error";
+        }
+      });
+
+      demoButton.addEventListener("click", async () => {
+        startStatus.textContent = "Demo-Dokument wird geladen ...";
+        startStatus.className = "status";
+        try {
+          const response = await fetch("/demo/demo_aufsatz.docx");
+          if (!response.ok) {
+            throw new Error("Das Demo-Dokument konnte nicht geladen werden.");
+          }
+          const blob = await response.blob();
+          const base64 = await readBlobAsBase64(blob);
+          sessionStorage.setItem(
+            "korrekturroboter_pending_file",
+            JSON.stringify({
+              name: "demo_aufsatz.docx",
+              type: blob.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              size: blob.size,
+              base64,
+            })
+          );
+          window.location.href = "/plattform.html?demo=1";
+        } catch (error) {
+          startStatus.textContent = error.message;
+          startStatus.className = "status error";
+        }
+      });
+
+      healthButton.addEventListener("click", checkHealth);
+      checkHealth();
+
+      async function checkHealth() {
+        healthBox.innerHTML = "Lokales LM Studio wird geprüft ...";
+        healthBox.className = "health";
+        try {
+          const response = await fetch("/api/health");
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
+          }
+          healthBox.innerHTML = formatStatusMarkup([
+            payload.privacy_notice,
+            `Verbindung erfolgreich: ${payload.base_url}`,
+            `Geladene Modelle: ${payload.models.join(", ")}`,
+            `Standardmodell: ${payload.selected_model}`,
+          ].join("\n"));
+          healthBox.className = "health ok";
+        } catch (error) {
+          healthBox.innerHTML = formatStatusMarkup(buildLmStudioHelp(error.message));
+          healthBox.className = "health error";
+        }
+      }
+
+      function formatStatusMarkup(message) {
+        return String(message)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;")
+          .replaceAll("\n\n", "<br /><br />")
+          .replaceAll("\n", "<br />");
+      }
+
+      function buildLmStudioHelp(message) {
+        const normalized = String(message || "").trim();
+        const lower = normalized.toLowerCase();
+        if (lower.includes("connection refused") || lower.includes("could not connect") || lower.includes("nicht erreichbar")) {
+          return [
+            "LM Studio antwortet nicht auf http://127.0.0.1:1234/v1.",
+            "So behebst du das:",
+            "1. LM Studio öffnen.",
+            "2. Ein Modell laden oder herunterladen.",
+            "3. In LM Studio den lokalen Server auf Port 1234 starten.",
+            '4. Danach hier erneut auf "Lokales LM Studio prüfen" klicken.',
+            `Technische Meldung: ${normalized}`,
+          ].join("\n");
+        }
+        if (lower.includes("keine geladenen modelle")) {
+          return [
+            "LM Studio läuft, aber es ist noch kein Modell geladen.",
+            "So behebst du das:",
+            "1. In LM Studio ein passendes lokales Modell laden.",
+            "2. Den lokalen Server aktiv lassen.",
+            "3. Danach die Prüfung erneut starten.",
+            `Technische Meldung: ${normalized}`,
+          ].join("\n");
+        }
+        return normalized;
+      }
+
+      function readFileAsBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const commaIndex = result.indexOf(",");
+            resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+          };
+          reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function readBlobAsBase64(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const commaIndex = result.indexOf(",");
+            resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+          };
+          reader.onerror = () => reject(new Error("Das Demo-Dokument konnte nicht verarbeitet werden."));
+          reader.readAsDataURL(blob);
+        });
+      }
+    </script>
+  </body>
+</html>
