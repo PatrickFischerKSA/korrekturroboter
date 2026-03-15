@@ -27,11 +27,13 @@ const elements = {
   schoolModeHint: document.getElementById("schoolModeHint"),
   model: document.getElementById("model"),
   healthButton: document.getElementById("healthButton"),
+  restartServicesButton: document.getElementById("restartServicesButton"),
   reviewButton: document.getElementById("reviewButton"),
   resetButton: document.getElementById("resetButton"),
   statusBox: document.getElementById("statusBox"),
   warningBox: document.getElementById("warningBox"),
   healthBox: document.getElementById("healthBox"),
+  runtimeInfoBox: document.getElementById("runtimeInfoBox"),
   lmStudioStatusCard: document.getElementById("lmStudioStatusCard"),
   lmStudioBadge: document.getElementById("lmStudioBadge"),
   lmStudioStatusText: document.getElementById("lmStudioStatusText"),
@@ -118,6 +120,7 @@ const FORM_GUIDES = {
 };
 
 elements.healthButton.addEventListener("click", checkHealth);
+elements.restartServicesButton.addEventListener("click", restartLocalServices);
 elements.reviewButton.addEventListener("click", generateReview);
 elements.resetButton.addEventListener("click", resetFormState);
 elements.downloadButton.addEventListener("click", downloadReview);
@@ -151,10 +154,12 @@ checkHealth();
 
 async function checkHealth() {
   setHealth("Lokale Dienste werden geprüft ...", "");
+  let payload = null;
   try {
     const response = await fetch("/api/health");
-    const payload = await response.json();
+    payload = await response.json();
     renderServiceStatus(payload);
+    renderRuntimeStatus(payload.runtime);
 
     const lines = [
       payload.privacy_notice,
@@ -175,6 +180,7 @@ async function checkHealth() {
       throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
     }
     setHealth(lines.join("\n"), "ok");
+    return payload;
   } catch (error) {
     renderServiceStatus({
       ok: false,
@@ -184,7 +190,64 @@ async function checkHealth() {
         error: "Nicht geprüft oder nicht erreichbar.",
       },
     });
+    renderRuntimeStatus(payload?.runtime || null);
     setHealth(buildLmStudioHelp(error.message), "error");
+    return payload;
+  }
+}
+
+async function restartLocalServices() {
+  elements.restartServicesButton.disabled = true;
+  renderRuntimeStatus(
+    {
+      java_ready: false,
+      bootstrap_in_progress: true,
+      message: "Java wird lokal eingerichtet oder LanguageTool neu gestartet. Bitte kurz warten.",
+      runtime_root: "",
+      languagetool_running: false,
+    },
+    "warning"
+  );
+  setStatus(
+    "Lokale Dienste werden neu gestartet. Wenn Java lokal noch fehlt, wird es jetzt eingerichtet. Das kann ein bis drei Minuten dauern.",
+    "warning"
+  );
+
+  try {
+    const response = await fetch("/api/services/restart", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    const payload = await response.json();
+    renderRuntimeStatus(payload.runtime, payload.ok ? "warning" : "error");
+    setStatus(payload.message || "Die lokalen Dienste wurden angestoßen.", payload.ok ? "warning" : "error");
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await wait(2500);
+      const healthPayload = await checkHealth();
+      if (healthPayload?.languagetool?.ok) {
+        setStatus("Die lokalen Dienste sind jetzt bereit.", "ok");
+        break;
+      }
+      if (!healthPayload?.runtime?.bootstrap_in_progress && attempt >= 2) {
+        break;
+      }
+    }
+  } catch (error) {
+    renderRuntimeStatus(
+      {
+        java_ready: false,
+        bootstrap_in_progress: false,
+        message: error.message || "Die lokalen Dienste konnten nicht neu gestartet werden.",
+      },
+      "error"
+    );
+    setStatus(error.message || "Die lokalen Dienste konnten nicht neu gestartet werden.", "error");
+  } finally {
+    elements.restartServicesButton.disabled = false;
   }
 }
 
@@ -982,6 +1045,32 @@ function setHealth(message, variant) {
   elements.healthBox.className = variant ? `health ${variant}` : "health";
 }
 
+function renderRuntimeStatus(runtime, forcedVariant = "") {
+  if (!runtime || !runtime.message) {
+    elements.runtimeInfoBox.innerHTML = "";
+    elements.runtimeInfoBox.className = "status info hidden";
+    return;
+  }
+
+  const lines = [runtime.message];
+  if (!runtime.java_ready && runtime.runtime_root) {
+    lines.push(`Lokaler Java-Zielpfad: ${runtime.runtime_root}`);
+  }
+  if (runtime.bootstrap_in_progress) {
+    lines.push("Bitte das Fenster offen lassen und danach erneut auf \"Lokale Dienste prüfen\" klicken.");
+  } else if (!runtime.languagetool_running) {
+    lines.push("Wenn LanguageTool noch fehlt, kannst du es mit \"Lokale Dienste neu starten\" aus der Oberfläche anstoßen.");
+  }
+
+  const variant =
+    forcedVariant ||
+    (runtime.bootstrap_in_progress ? "warning" : runtime.languagetool_running ? "ok" : "info");
+
+  elements.runtimeInfoBox.innerHTML = formatStatusMarkup(lines.join("\n"));
+  elements.runtimeInfoBox.className = `status ${variant}`;
+  elements.runtimeInfoBox.classList.remove("hidden");
+}
+
 function showWarnings(items) {
   const warnings = (items || []).filter(Boolean);
   if (!warnings.length) {
@@ -1002,6 +1091,10 @@ function formatStatusMarkup(message) {
   return escapeHtml(message)
     .replaceAll("\n\n", "<br /><br />")
     .replaceAll("\n", "<br />");
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function buildLmStudioHelp(message) {

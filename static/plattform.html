@@ -48,6 +48,10 @@
             übernimmt er Kriterium 4 bevorzugt für Grammatik und Rechtschreibung.
           </p>
           <p class="hint">
+            Beim ersten Start kann die App die lokale Java-Laufzeit selbst einrichten. In dieser Zeit
+            erscheint unten eine Statusmeldung wie <strong>Java wird lokal eingerichtet, bitte kurz warten</strong>.
+          </p>
+          <p class="hint">
             Kurzablauf: 1. LanguageTool lokal starten. 2. Dienst auf <code>localhost:8081</code> halten.
             3. Hier auf <strong>Lokale Dienste prüfen</strong> klicken. 4. Erst danach die Korrektur ausführen.
           </p>
@@ -191,6 +195,7 @@
 
         <div class="actions">
           <button id="healthButton" class="ghost" type="button">Lokale Dienste prüfen</button>
+          <button id="restartServicesButton" class="ghost" type="button">Lokale Dienste neu starten</button>
           <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
           <button id="resetButton" class="ghost" type="button">Eingaben zurücksetzen</button>
         </div>
@@ -198,6 +203,7 @@
         <div id="statusBox" class="status" aria-live="polite">Bereit.</div>
         <div id="warningBox" class="status warning hidden"></div>
         <div id="healthBox" class="health"></div>
+        <div id="runtimeInfoBox" class="status info hidden"></div>
       </section>
 
       <section id="resultPanel" class="panel hidden">

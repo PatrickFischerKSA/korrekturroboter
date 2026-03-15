@@ -313,6 +313,13 @@ button:disabled {
   background: #fff8ea;
 }
 
+.status.info,
+.health.info {
+  border-color: rgba(16, 88, 145, 0.2);
+  color: #21557c;
+  background: #f5fbff;
+}
+
 .inline-actions {
   display: flex;
   flex-wrap: wrap;

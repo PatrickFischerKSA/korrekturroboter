@@ -2,6 +2,8 @@ import base64
 import json
 import mimetypes
 import os
+import signal
+import subprocess
 import sys
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +30,14 @@ HOST = os.environ.get("KORREKTURROBOTER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("KORREKTURROBOTER_PORT", "8090"))
 ALLOWED_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 PRIVACY_NOTICE = "Datenschutzmodus aktiv: Der Dienst arbeitet ausschließlich mit lokalem LM Studio und lokalem LanguageTool auf localhost."
+RUNTIME_ROOT = Path.home() / ".korrekturroboter-runtime" / "openjdk-21"
+JAVA_BIN = RUNTIME_ROOT / "lib" / "jvm" / "bin" / "java"
+RUNTIME_LOG_FILE = ROOT_DIR / ".runtime-bootstrap.log"
+LT_PID_FILE = ROOT_DIR / ".languagetool.pid"
+LT_LOG_FILE = ROOT_DIR / ".languagetool.log"
+LT_SERVER_JAR = ROOT_DIR / "vendor" / "languagetool" / "LanguageTool" / "languagetool-server.jar"
+RUNTIME_HELPERS = ROOT_DIR / "scripts" / "runtime_helpers.zsh"
+LM_STUDIO_APP_NAME = "LM Studio"
 
 
 class KorrekturHandler(SimpleHTTPRequestHandler):
@@ -51,6 +61,9 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/dossier-detect":
             self._handle_dossier_detect()
             return
+        if parsed.path == "/api/services/restart":
+            self._handle_restart_services()
+            return
         if parsed.path == "/api/review":
             self._handle_review()
             return
@@ -70,6 +83,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
     def _handle_health(self) -> None:
         base_url = _strict_local_base_url(LM_STUDIO_BASE_URL)
         lt_base_url = _strict_local_base_url(LANGUAGETOOL_BASE_URL)
+        runtime_payload = _build_runtime_status()
         try:
             models = [entry.get("id", "") for entry in list_models(base_url) if entry.get("id")]
             if not models:
@@ -95,6 +109,7 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
                     "models": models,
                     "selected_model": models[0],
                     "languagetool": lt_payload,
+                    "runtime": runtime_payload,
                     "privacy_notice": PRIVACY_NOTICE,
                 }
             )
@@ -107,11 +122,59 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
                         "ok": False,
                         "base_url": lt_base_url,
                     },
+                    "runtime": runtime_payload,
                     "error": str(exc),
                     "privacy_notice": PRIVACY_NOTICE,
                 },
                 status=HTTPStatus.BAD_GATEWAY,
             )
+
+    def _handle_restart_services(self) -> None:
+        runtime_before = _build_runtime_status()
+        notes: list[str] = []
+        ok = False
+
+        if runtime_before.get("bootstrap_in_progress"):
+            notes.append("Java wird lokal bereits eingerichtet. Bitte kurz warten und danach erneut prüfen.")
+
+        try:
+            _stop_pid_file(LT_PID_FILE)
+        except Exception:
+            pass
+
+        try:
+            _trigger_languagetool_start()
+            ok = True
+            runtime_after = _build_runtime_status()
+            if not runtime_before.get("java_ready"):
+                notes.append("Java wird lokal eingerichtet, bitte kurz warten. Danach startet LanguageTool automatisch.")
+            else:
+                notes.append("LanguageTool wurde lokal neu angestoßen.")
+        except Exception as exc:
+            runtime_after = _build_runtime_status()
+            notes.append(f"LanguageTool konnte nicht automatisch gestartet werden: {exc}")
+
+        try:
+            subprocess.Popen(
+                ["open", "-a", LM_STUDIO_APP_NAME],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            ok = True
+            notes.append("LM Studio wurde geöffnet. Falls der lokale Server dort gestoppt ist, bitte ihn wieder aktivieren.")
+        except Exception as exc:
+            notes.append(f"LM Studio konnte nicht automatisch geöffnet werden: {exc}")
+
+        self._send_json(
+            {
+                "ok": ok,
+                "message": " ".join(notes).strip(),
+                "runtime": runtime_after,
+                "privacy_notice": PRIVACY_NOTICE,
+            },
+            status=HTTPStatus.OK if ok else HTTPStatus.BAD_GATEWAY,
+        )
 
     def _handle_review(self) -> None:
         try:
@@ -256,6 +319,95 @@ def _strict_local_bind_host(candidate: str) -> str:
     if candidate not in ALLOWED_LOCAL_HOSTS:
         raise ReviewError("Im Datenschutzmodus darf der Webserver nur an localhost gebunden werden.")
     return candidate
+
+
+def _tail_file(path: Path, lines: int = 8) -> str:
+    if not path.exists():
+        return ""
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(content[-lines:])
+
+
+def _pid_from_file(pid_file: Path) -> int | None:
+    try:
+        raw = pid_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw.isdigit():
+        return None
+    return int(raw)
+
+
+def _pid_running(pid_file: Path) -> bool:
+    pid = _pid_from_file(pid_file)
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _stop_pid_file(pid_file: Path) -> None:
+    pid = _pid_from_file(pid_file)
+    if not pid:
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+
+
+def _build_runtime_status() -> dict:
+    java_ready = JAVA_BIN.exists()
+    lt_installed = LT_SERVER_JAR.exists()
+    lt_running = _pid_running(LT_PID_FILE)
+    runtime_log_tail = _tail_file(RUNTIME_LOG_FILE, lines=10)
+    lt_log_tail = _tail_file(LT_LOG_FILE, lines=10)
+    bootstrap_in_progress = "Lokale Java-Laufzeit wird" in runtime_log_tail and "Lokale Java-Laufzeit ist bereit." not in runtime_log_tail
+
+    if bootstrap_in_progress:
+        message = "Java wird lokal eingerichtet. Das kann beim ersten Start ein bis drei Minuten dauern."
+    elif not java_ready:
+        message = "Für LanguageTool fehlt noch die lokale Java-Laufzeit. Sie wird beim Start automatisch nachinstalliert."
+    elif lt_installed and not lt_running:
+        message = "LanguageTool ist vorhanden, läuft aber aktuell noch nicht."
+    elif lt_running:
+        message = "LanguageTool läuft lokal und kann für Kriterium 4 verwendet werden."
+    else:
+        message = "Der lokale Runtime-Status ist noch unklar."
+
+    return {
+        "java_ready": java_ready,
+        "languagetool_installed": lt_installed,
+        "languagetool_running": lt_running,
+        "runtime_root": str(RUNTIME_ROOT),
+        "runtime_log_tail": runtime_log_tail,
+        "languagetool_log_tail": lt_log_tail,
+        "bootstrap_in_progress": bootstrap_in_progress,
+        "message": message,
+    }
+
+
+def _trigger_languagetool_start() -> None:
+    if not RUNTIME_HELPERS.exists():
+        raise ReviewError("Die Runtime-Helfer fehlen im Projekt.")
+    command = (
+        f'export SCRIPT_DIR="{ROOT_DIR}"; '
+        f'source "{RUNTIME_HELPERS}"; '
+        "start_languagetool_server"
+    )
+    subprocess.Popen(
+        ["/bin/zsh", "-lc", command],
+        cwd=str(ROOT_DIR),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def main() -> None:
