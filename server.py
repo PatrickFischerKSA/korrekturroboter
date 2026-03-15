@@ -61,6 +61,9 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/dossier-detect":
             self._handle_dossier_detect()
             return
+        if parsed.path == "/api/services/languagetool":
+            self._handle_restart_languagetool()
+            return
         if parsed.path == "/api/services/restart":
             self._handle_restart_services()
             return
@@ -165,6 +168,41 @@ class KorrekturHandler(SimpleHTTPRequestHandler):
             notes.append("LM Studio wurde geöffnet. Falls der lokale Server dort gestoppt ist, bitte ihn wieder aktivieren.")
         except Exception as exc:
             notes.append(f"LM Studio konnte nicht automatisch geöffnet werden: {exc}")
+
+        self._send_json(
+            {
+                "ok": ok,
+                "message": " ".join(notes).strip(),
+                "runtime": runtime_after,
+                "privacy_notice": PRIVACY_NOTICE,
+            },
+            status=HTTPStatus.OK if ok else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def _handle_restart_languagetool(self) -> None:
+        runtime_before = _build_runtime_status()
+        notes: list[str] = []
+
+        if runtime_before.get("bootstrap_in_progress"):
+            notes.append("Java wird lokal bereits eingerichtet. Bitte kurz warten.")
+
+        try:
+            _stop_pid_file(LT_PID_FILE)
+        except Exception:
+            pass
+
+        try:
+            _trigger_languagetool_start()
+            runtime_after = _build_runtime_status()
+            if not runtime_before.get("java_ready"):
+                notes.append("Java wird lokal eingerichtet. Danach startet LanguageTool automatisch.")
+            else:
+                notes.append("LanguageTool wurde lokal neu angestoßen.")
+            ok = True
+        except Exception as exc:
+            runtime_after = _build_runtime_status()
+            notes.append(f"LanguageTool konnte nicht automatisch gestartet werden: {exc}")
+            ok = False
 
         self._send_json(
             {
@@ -331,6 +369,14 @@ def _tail_file(path: Path, lines: int = 8) -> str:
     return "\n".join(content[-lines:])
 
 
+def _last_nonempty_line(value: str) -> str:
+    for line in reversed(value.splitlines()):
+        line = line.strip()
+        if line:
+            return line
+    return ""
+
+
 def _pid_from_file(pid_file: Path) -> int | None:
     try:
         raw = pid_file.read_text(encoding="utf-8").strip()
@@ -369,6 +415,8 @@ def _build_runtime_status() -> dict:
     runtime_log_tail = _tail_file(RUNTIME_LOG_FILE, lines=10)
     lt_log_tail = _tail_file(LT_LOG_FILE, lines=10)
     bootstrap_in_progress = "Lokale Java-Laufzeit wird" in runtime_log_tail and "Lokale Java-Laufzeit ist bereit." not in runtime_log_tail
+    runtime_last_line = _last_nonempty_line(runtime_log_tail)
+    lt_last_line = _last_nonempty_line(lt_log_tail)
 
     if bootstrap_in_progress:
         message = "Java wird lokal eingerichtet. Das kann beim ersten Start ein bis drei Minuten dauern."
@@ -381,6 +429,21 @@ def _build_runtime_status() -> dict:
     else:
         message = "Der lokale Runtime-Status ist noch unklar."
 
+    last_activity = ""
+    last_activity_type = "info"
+    if bootstrap_in_progress and runtime_last_line:
+        last_activity = runtime_last_line
+        last_activity_type = "warning"
+    elif lt_running and lt_last_line:
+        last_activity = lt_last_line
+        last_activity_type = "ok"
+    elif runtime_last_line:
+        last_activity = runtime_last_line
+        last_activity_type = "info"
+    elif lt_last_line:
+        last_activity = lt_last_line
+        last_activity_type = "info"
+
     return {
         "java_ready": java_ready,
         "languagetool_installed": lt_installed,
@@ -390,6 +453,8 @@ def _build_runtime_status() -> dict:
         "languagetool_log_tail": lt_log_tail,
         "bootstrap_in_progress": bootstrap_in_progress,
         "message": message,
+        "last_activity": last_activity,
+        "last_activity_type": last_activity_type,
     }
 
 

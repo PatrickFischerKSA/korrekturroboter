@@ -168,6 +168,47 @@ h1 {
   margin-bottom: 18px;
 }
 
+.runtime-activity {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdfa;
+  font-size: 0.95rem;
+}
+
+.runtime-activity strong {
+  font-size: 0.86rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.runtime-activity-ok {
+  border-color: rgba(13, 122, 103, 0.22);
+  background: rgba(13, 122, 103, 0.05);
+}
+
+.runtime-activity-warning {
+  border-color: rgba(169, 115, 0, 0.24);
+  background: #fff8ea;
+  color: #8a5a00;
+}
+
+.runtime-activity-error {
+  border-color: rgba(180, 35, 24, 0.24);
+  background: rgba(180, 35, 24, 0.05);
+  color: var(--alert);
+}
+
+.runtime-activity-info {
+  border-color: rgba(16, 88, 145, 0.2);
+  background: #f5fbff;
+  color: #21557c;
+}
+
 .panel-head h2 {
   font-size: clamp(1.8rem, 3vw, 2.6rem);
 }

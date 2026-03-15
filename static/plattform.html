@@ -195,6 +195,7 @@
 
         <div class="actions">
           <button id="healthButton" class="ghost" type="button">Lokale Dienste prüfen</button>
+          <button id="restartLanguageToolButton" class="ghost small" type="button">LanguageTool allein neu starten</button>
           <button id="restartServicesButton" class="ghost" type="button">Lokale Dienste neu starten</button>
           <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
           <button id="resetButton" class="ghost" type="button">Eingaben zurücksetzen</button>
@@ -204,6 +205,10 @@
         <div id="warningBox" class="status warning hidden"></div>
         <div id="healthBox" class="health"></div>
         <div id="runtimeInfoBox" class="status info hidden"></div>
+        <div id="runtimeActivityBox" class="runtime-activity hidden">
+          <strong>Letzte Runtime-Aktivität</strong>
+          <span id="runtimeActivityText">Noch keine Aktivität erfasst.</span>
+        </div>
       </section>
 
       <section id="resultPanel" class="panel hidden">

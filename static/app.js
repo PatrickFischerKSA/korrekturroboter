@@ -27,6 +27,7 @@ const elements = {
   schoolModeHint: document.getElementById("schoolModeHint"),
   model: document.getElementById("model"),
   healthButton: document.getElementById("healthButton"),
+  restartLanguageToolButton: document.getElementById("restartLanguageToolButton"),
   restartServicesButton: document.getElementById("restartServicesButton"),
   reviewButton: document.getElementById("reviewButton"),
   resetButton: document.getElementById("resetButton"),
@@ -34,6 +35,8 @@ const elements = {
   warningBox: document.getElementById("warningBox"),
   healthBox: document.getElementById("healthBox"),
   runtimeInfoBox: document.getElementById("runtimeInfoBox"),
+  runtimeActivityBox: document.getElementById("runtimeActivityBox"),
+  runtimeActivityText: document.getElementById("runtimeActivityText"),
   lmStudioStatusCard: document.getElementById("lmStudioStatusCard"),
   lmStudioBadge: document.getElementById("lmStudioBadge"),
   lmStudioStatusText: document.getElementById("lmStudioStatusText"),
@@ -120,6 +123,7 @@ const FORM_GUIDES = {
 };
 
 elements.healthButton.addEventListener("click", checkHealth);
+elements.restartLanguageToolButton.addEventListener("click", restartLanguageToolOnly);
 elements.restartServicesButton.addEventListener("click", restartLocalServices);
 elements.reviewButton.addEventListener("click", generateReview);
 elements.resetButton.addEventListener("click", resetFormState);
@@ -198,6 +202,7 @@ async function checkHealth() {
 
 async function restartLocalServices() {
   elements.restartServicesButton.disabled = true;
+  elements.restartLanguageToolButton.disabled = true;
   renderRuntimeStatus(
     {
       java_ready: false,
@@ -247,6 +252,65 @@ async function restartLocalServices() {
     );
     setStatus(error.message || "Die lokalen Dienste konnten nicht neu gestartet werden.", "error");
   } finally {
+    elements.restartServicesButton.disabled = false;
+    elements.restartLanguageToolButton.disabled = false;
+  }
+}
+
+async function restartLanguageToolOnly() {
+  elements.restartLanguageToolButton.disabled = true;
+  elements.restartServicesButton.disabled = true;
+  renderRuntimeStatus(
+    {
+      java_ready: false,
+      bootstrap_in_progress: true,
+      message: "LanguageTool wird lokal neu gestartet. Wenn Java lokal fehlt, wird es jetzt eingerichtet.",
+      runtime_root: "",
+      languagetool_running: false,
+      last_activity: "LanguageTool-Neustart wurde ausgelöst.",
+      last_activity_type: "warning",
+    },
+    "warning"
+  );
+  setStatus("LanguageTool wird lokal neu gestartet. Bitte kurz warten.", "warning");
+
+  try {
+    const response = await fetch("/api/services/languagetool", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    const payload = await response.json();
+    renderRuntimeStatus(payload.runtime, payload.ok ? "warning" : "error");
+    setStatus(payload.message || "LanguageTool wurde lokal angestoßen.", payload.ok ? "warning" : "error");
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await wait(2500);
+      const healthPayload = await checkHealth();
+      if (healthPayload?.languagetool?.ok) {
+        setStatus("LanguageTool ist jetzt bereit.", "ok");
+        break;
+      }
+      if (!healthPayload?.runtime?.bootstrap_in_progress && attempt >= 2) {
+        break;
+      }
+    }
+  } catch (error) {
+    renderRuntimeStatus(
+      {
+        java_ready: false,
+        bootstrap_in_progress: false,
+        message: error.message || "LanguageTool konnte nicht neu gestartet werden.",
+        last_activity: error.message || "LanguageTool konnte nicht neu gestartet werden.",
+        last_activity_type: "error",
+      },
+      "error"
+    );
+    setStatus(error.message || "LanguageTool konnte nicht neu gestartet werden.", "error");
+  } finally {
+    elements.restartLanguageToolButton.disabled = false;
     elements.restartServicesButton.disabled = false;
   }
 }
@@ -1049,6 +1113,7 @@ function renderRuntimeStatus(runtime, forcedVariant = "") {
   if (!runtime || !runtime.message) {
     elements.runtimeInfoBox.innerHTML = "";
     elements.runtimeInfoBox.className = "status info hidden";
+    renderRuntimeActivity(null);
     return;
   }
 
@@ -1069,6 +1134,20 @@ function renderRuntimeStatus(runtime, forcedVariant = "") {
   elements.runtimeInfoBox.innerHTML = formatStatusMarkup(lines.join("\n"));
   elements.runtimeInfoBox.className = `status ${variant}`;
   elements.runtimeInfoBox.classList.remove("hidden");
+  renderRuntimeActivity(runtime);
+}
+
+function renderRuntimeActivity(runtime) {
+  if (!runtime || !runtime.last_activity) {
+    elements.runtimeActivityText.textContent = "Noch keine Aktivität erfasst.";
+    elements.runtimeActivityBox.className = "runtime-activity hidden";
+    return;
+  }
+
+  elements.runtimeActivityText.textContent = runtime.last_activity;
+  const variant = runtime.last_activity_type || "info";
+  elements.runtimeActivityBox.className = `runtime-activity runtime-activity-${variant}`;
+  elements.runtimeActivityBox.classList.remove("hidden");
 }
 
 function showWarnings(items) {
