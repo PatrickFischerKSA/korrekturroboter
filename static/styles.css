@@ -261,6 +261,35 @@ button:disabled {
   border-radius: 18px;
 }
 
+.toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  padding: 16px 18px;
+  background: #fffdfa;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.toggle-card strong,
+.toggle-card small {
+  display: block;
+}
+
+.toggle-card small {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.toggle-card input[type="checkbox"] {
+  width: 22px;
+  min-height: 22px;
+  accent-color: var(--accent);
+}
+
 .guide-text {
   margin: 0;
   color: var(--ink);
@@ -445,10 +474,64 @@ button:disabled {
   line-height: 1.6;
 }
 
+.section-report-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.section-report-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(232, 223, 207, 0.22);
+}
+
+.section-report-card h4 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.section-report-head,
+.section-report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.section-signal {
+  padding: 14px;
+  border: 1px solid rgba(200, 191, 174, 0.8);
+  border-radius: 16px;
+  background: #fffdfa;
+}
+
+.section-signal strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.section-signal p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 @media (max-width: 900px) {
   .grid,
   .criteria-grid,
-  .start-grid {
+  .start-grid,
+  .section-signal-grid {
     grid-template-columns: 1fr;
   }
 

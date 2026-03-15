@@ -22,6 +22,8 @@ const elements = {
   assignmentWrap: document.getElementById("assignmentWrap"),
   assignmentInput: document.getElementById("assignmentInput"),
   gymLevel: document.getElementById("gymLevel"),
+  schoolMode: document.getElementById("schoolMode"),
+  schoolModeHint: document.getElementById("schoolModeHint"),
   model: document.getElementById("model"),
   healthButton: document.getElementById("healthButton"),
   reviewButton: document.getElementById("reviewButton"),
@@ -32,6 +34,7 @@ const elements = {
   resultPanel: document.getElementById("resultPanel"),
   metadataBox: document.getElementById("metadataBox"),
   summaryBox: document.getElementById("summaryBox"),
+  sectionReportsBox: document.getElementById("sectionReportsBox"),
   criteriaGrid: document.getElementById("criteriaGrid"),
   orthographyBox: document.getElementById("orthographyBox"),
   downloadButton: document.getElementById("downloadButton"),
@@ -114,6 +117,7 @@ elements.exampleAssignmentButton.addEventListener("click", applyExampleAssignmen
 elements.dossierDetectButton.addEventListener("click", detectDossierContext);
 elements.confirmDossierButton.addEventListener("click", confirmSelectedDossierCandidate);
 elements.documentType.addEventListener("change", syncFormGuide);
+elements.schoolMode.addEventListener("change", syncSchoolModeState);
 elements.formQuickButtons.forEach((button) => {
   button.addEventListener("click", () => setDocumentTypeFromQuickButton(button.dataset.form || "auto"));
 });
@@ -128,6 +132,7 @@ elements.dossierUploadBox.addEventListener("drop", handleDossierDrop);
 
 syncFormGuide();
 elements.model.value = DEFAULT_MODEL_ID;
+syncSchoolModeState();
 updateReviewButtonState();
 clearWarnings();
 restorePendingFile();
@@ -186,6 +191,7 @@ async function generateReview() {
         assignment_text: assignmentVisible ? elements.assignmentInput.value.trim() : "",
         gym_level: elements.gymLevel.value,
         model: elements.model.value.trim(),
+        school_mode: elements.schoolMode.checked,
       }),
     });
     const payload = await response.json();
@@ -195,7 +201,10 @@ async function generateReview() {
 
     currentResult = payload;
     renderResult(payload.review);
-    showWarnings([...(payload.dossier_context?.warnings || []), ...(payload.review?.warnings || [])]);
+    showWarnings([
+      ...buildDossierWarnings(payload.dossier_context || {}),
+      ...buildReviewWarnings(payload.review || {}),
+    ]);
     setStatus("Korrigiertes DOCX wurde erfolgreich erzeugt.", "ok");
   } catch (error) {
     currentResult = null;
@@ -235,6 +244,7 @@ function renderResult(review) {
     <h3>Kurzzusammenfassung</h3>
     <p>${formatText(review.summary || "Keine Zusammenfassung vorhanden.")}</p>
   `;
+  renderSectionReports(review.section_reports || []);
 
   const labels = {
     inhalt: "Kriterium 1 - Inhalt",
@@ -259,6 +269,55 @@ function renderResult(review) {
     <h3>Kriterium 4 - Sprachliche Korrektheit</h3>
     <div class="score">Teilnote ${Number(orthography.grade).toFixed(2)}</div>
     <p>${formatText(orthography.comment)}</p>
+  `;
+}
+
+function renderSectionReports(sectionReports) {
+  if (!Array.isArray(sectionReports) || !sectionReports.length) {
+    elements.sectionReportsBox.innerHTML = "";
+    elements.sectionReportsBox.classList.add("hidden");
+    return;
+  }
+
+  elements.sectionReportsBox.classList.remove("hidden");
+  elements.sectionReportsBox.innerHTML = `
+    <h3>Zwischenberichte pro Abschnitt</h3>
+    <p>Die Korrektur wurde abschnittsweise vorbereitet und danach zu einem Gesamtfeedback verdichtet. Hier siehst du die tragenden Zwischenbefunde.</p>
+    <div class="section-report-list">
+      ${sectionReports
+        .map((report) => {
+          const criteria = ["inhalt", "aufbau", "ausdruck"]
+            .map((key) => {
+              const entry = report.criteria_signals?.[key] || {};
+              return `
+                <div class="section-signal">
+                  <strong>${escapeHtml(capitalize(key))}</strong>
+                  <span class="score">Teilnote ${Number(entry.score || 4).toFixed(2)}</span>
+                  <p>${formatText(entry.evidence || "Für diesen Aspekt liegt in diesem Abschnitt kein eigener Schwerpunkt vor.")}</p>
+                </div>
+              `;
+            })
+            .join("");
+
+          return `
+            <article class="section-report-card">
+              <div class="section-report-head">
+                <h4>${escapeHtml(report.label || "Abschnitt")}</h4>
+                <span class="candidate-meta">${escapeHtml(report.range_label || "")}</span>
+              </div>
+              <p>${formatText(report.summary || "Keine Abschnittszusammenfassung vorhanden.")}</p>
+              <div class="section-report-meta">
+                <span class="candidate-meta">${escapeHtml(String(report.annotation_count || 0))} Textkommentare</span>
+                <span class="candidate-meta">${escapeHtml(String(report.language_error_count || 0))} Sprachfehler</span>
+              </div>
+              <div class="section-signal-grid">
+                ${criteria}
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
   `;
 }
 
@@ -411,6 +470,7 @@ async function detectDossierContext(silent = false) {
         document_base64: documentBase64,
         dossier_name: selectedDossier.name,
         dossier_base64: dossierBase64,
+        school_mode: elements.schoolMode.checked,
       }),
     });
     const payload = await response.json();
@@ -463,6 +523,16 @@ function buildDossierWarnings(context) {
   if (context.pipeline?.mode === "two_stage_local") {
     warnings.unshift(
       `Zweistufige Dossieranalyse aktiv: ${context.pipeline.stage_1 || "Themen extrahieren"} ${context.pipeline.stage_2 || "Abgleich mit dem Aufsatz"}`.trim()
+    );
+  }
+  return warnings;
+}
+
+function buildReviewWarnings(review) {
+  const warnings = [...(review.warnings || [])];
+  if (review.pipeline?.mode === "two_stage_review") {
+    warnings.unshift(
+      `Zweistufige Korrekturanalyse aktiv: ${review.pipeline.stage_1 || "Abschnittsanalyse"} ${review.pipeline.stage_2 || "Gesamtauswertung"}`.trim()
     );
   }
   return warnings;
@@ -573,6 +643,7 @@ function resetFormState() {
   elements.assignmentWrap.classList.add("hidden");
   elements.assignmentToggle.textContent = "Aufgabenstellung eingeben";
   elements.gymLevel.value = "1";
+  elements.schoolMode.checked = true;
   elements.model.value = DEFAULT_MODEL_ID;
   elements.fileStatus.textContent = "Noch keine Datei geladen.";
   elements.fileStatus.className = "status";
@@ -582,6 +653,7 @@ function resetFormState() {
   elements.healthBox.innerHTML = "";
   clearWarnings();
   setStatus("Alle Eingaben wurden zurückgesetzt.", "ok");
+  syncSchoolModeState();
   syncFormGuide();
   updateReviewButtonState();
 }
@@ -629,6 +701,20 @@ function syncFormGuide() {
   elements.thesisLabel.textContent = `${guide.thesisLabel} (optional)`;
   elements.thesisInput.placeholder = guide.thesisPlaceholder;
   syncQuickFormButtons();
+}
+
+function syncSchoolModeState() {
+  if (elements.schoolMode.checked) {
+    elements.model.value = DEFAULT_MODEL_ID;
+    elements.model.disabled = true;
+    elements.schoolModeHint.textContent =
+      "Fixes Standardmodell, kompaktere Analysegrenzen und ruhigere lokale Läufe für längere Texte.";
+    return;
+  }
+
+  elements.model.disabled = false;
+  elements.schoolModeHint.textContent =
+    "Freier Modus: Modellkennung ist anpassbar. Das ist flexibler, aber bei lokalen langen Texten weniger stabil.";
 }
 
 function setDocumentTypeFromQuickButton(value) {
@@ -763,4 +849,9 @@ function truncateText(value, maxLength) {
     return text;
   }
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function capitalize(value) {
+  const text = String(value || "");
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
 }

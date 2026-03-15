@@ -136,6 +136,17 @@
             </div>
           </div>
 
+          <div class="field">
+            <span>Schulmodus</span>
+            <label class="toggle-card" for="schoolMode">
+              <span>
+                <strong>Nur stabile Standardeinstellungen verwenden</strong>
+                <small id="schoolModeHint">Fixes Standardmodell, kompaktere Analysegrenzen und ruhigere lokale Läufe für längere Texte.</small>
+              </span>
+              <input id="schoolMode" type="checkbox" checked />
+            </label>
+          </div>
+
           <label class="field">
             <span>Modell (optional)</span>
             <input id="model" type="text" placeholder="leer lassen für erstes geladenes Modell" />
@@ -161,6 +172,7 @@
 
         <div id="metadataBox" class="summary"></div>
         <div id="summaryBox" class="summary"></div>
+        <div id="sectionReportsBox" class="summary hidden"></div>
         <div id="criteriaGrid" class="criteria-grid"></div>
         <div id="orthographyBox" class="orthography"></div>
 
