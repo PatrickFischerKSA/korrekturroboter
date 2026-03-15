@@ -1,0 +1,20 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# Laufzeitdateien
+.korrekturroboter.log
+.korrekturroboter.pid
+.korrekturroboter.port
+.languagetool.log
+.languagetool.pid
+
+# Lokale Java-Laufzeit nur fuer den eigenen Mac
+.lt-java/
+.vendor-py/
+
+# Nicht noetige Download-/Entpack-Artefakte
+vendor/.DS_Store
+vendor/languagetool/.DS_Store
+vendor/languagetool/LanguageTool-latest-snapshot.zip
+vendor/languagetool/LanguageTool-6.8-SNAPSHOT/

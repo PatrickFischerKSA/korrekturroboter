@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="de-CH">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Korrekturroboter Plattform</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Plattform . DOCX . Lokal</p>
+        <h1>Korrekturplattform für deutschsprachige Maturaufsatztexte</h1>
+        <p class="lede">
+          Lade ein Word-Dokument, lege Form, Thema und Leitfrage fest und erzeuge lokal ein neues
+          DOCX mit Markierungen, Kommentaren und Gesamtfeedback.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>1. Eingabe</h2>
+          <p>Die Auswertung bleibt lokal, solange LM Studio lokal auf diesem Gerät oder im internen Netz läuft.</p>
+        </div>
+
+        <div id="serviceStatusBox" class="service-status-grid">
+          <article id="lmStudioStatusCard" class="service-card service-card-neutral">
+            <div class="service-card-head">
+              <h3>LM Studio</h3>
+              <span id="lmStudioBadge" class="service-badge service-badge-neutral">Ungeprüft</span>
+            </div>
+            <p id="lmStudioStatusText">Noch nicht geprüft.</p>
+          </article>
+          <article id="languageToolStatusCard" class="service-card service-card-neutral">
+            <div class="service-card-head">
+              <h3>LanguageTool Lokal</h3>
+              <span id="languageToolBadge" class="service-badge service-badge-neutral">Ungeprüft</span>
+            </div>
+            <p id="languageToolStatusText">Noch nicht geprüft.</p>
+          </article>
+        </div>
+
+        <div class="guide-box service-guide">
+          <p class="guide-text">
+            <strong>LanguageTool lokal starten</strong><br />
+            Ziel ist ein lokaler Server auf <code>http://127.0.0.1:8081/v2</code>. Die App prüft dort
+            die Endpunkte <code>/languages</code> und <code>/check</code>. Wenn der Dienst läuft,
+            übernimmt er Kriterium 4 bevorzugt für Grammatik und Rechtschreibung.
+          </p>
+          <p class="hint">
+            Kurzablauf: 1. LanguageTool lokal starten. 2. Dienst auf <code>localhost:8081</code> halten.
+            3. Hier auf <strong>Lokale Dienste prüfen</strong> klicken. 4. Erst danach die Korrektur ausführen.
+          </p>
+          <p class="hint">
+            Wenn LanguageTool nicht läuft, fällt die App auf den lokalen macOS-Rechtschreibdienst und
+            auf eigene Grammatikregeln zurück. Das ist besser als vorher, aber schwächer als ein aktiver
+            lokaler LanguageTool-Server.
+          </p>
+        </div>
+
+        <div class="grid">
+          <div class="field full-span">
+            <span>Word-Dokument</span>
+            <label id="uploadBox" class="upload-box" for="docxFile">
+              <strong>DOCX auswählen oder hier hineinziehen</strong>
+              <span>Nur `.docx`-Dateien. Der Dateistatus erscheint sofort darunter.</span>
+            </label>
+            <input id="docxFile" class="visually-hidden" type="file" accept=".docx" />
+            <div id="fileStatus" class="status">Noch keine Datei geladen.</div>
+          </div>
+
+          <div class="field full-span">
+            <span>Form direkt wählen</span>
+            <div id="formQuickButtons" class="quick-form-row">
+              <button class="ghost small quick-form-button" type="button" data-form="linear_discussion">Lineare Erörterung</button>
+              <button class="ghost small quick-form-button" type="button" data-form="dialectical_discussion">Dialektische Erörterung</button>
+              <button class="ghost small quick-form-button" type="button" data-form="essay">Essay</button>
+              <button class="ghost small quick-form-button" type="button" data-form="speech">Rede</button>
+              <button class="ghost small quick-form-button" type="button" data-form="auto">Weitere Formen</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Form (Dropdown)</span>
+            <select id="documentType">
+              <option value="auto">Automatisch erkennen</option>
+              <option value="essay">Essay</option>
+              <option value="speech">Redemanuskript</option>
+              <option value="linear_discussion">Lineare Erörterung</option>
+              <option value="dialectical_discussion">Dialektische Erörterung</option>
+            </select>
+          </label>
+
+          <div class="field full-span">
+            <span>Formhilfe</span>
+            <div id="formGuideBox" class="guide-box">
+              <p id="formGuideText" class="guide-text"></p>
+              <div class="inline-actions">
+                <button id="exampleAssignmentButton" class="ghost small" type="button">Beispiel-Aufgabenstellung einsetzen</button>
+                <p id="exampleAssignmentText" class="hint"></p>
+              </div>
+            </div>
+          </div>
+
+          <label class="field full-span">
+            <span>Thema (optional, wird aus dem Dossier erkannt)</span>
+            <input id="topicInput" type="text" placeholder="z. B. Sollten soziale Medien im Unterricht gezielt eingesetzt werden?" />
+          </label>
+
+          <label class="field full-span">
+            <span id="thesisLabel">Leitfrage / These des Aufsatzes (optional)</span>
+            <input id="thesisInput" type="text" placeholder="z. B. Der Aufsatz soll zeigen, dass eine dialektische Abwägung nötig ist." />
+          </label>
+
+          <div class="field full-span">
+            <span>Aufgabenstellung</span>
+            <div class="inline-actions">
+              <button id="assignmentToggle" class="ghost small" type="button">Aufgabenstellung eingeben</button>
+              <button id="dossierDetectButton" class="ghost small" type="button">Dossier auswerten</button>
+              <label class="button-link ghost small start-upload" for="dossierFile">Prüfungsdossier hochladen</label>
+              <input id="dossierFile" class="visually-hidden" type="file" accept=".docx,.txt,.pdf" />
+              <p class="hint">Hier das ganze Prüfungsdossier als TXT, PDF oder DOCX hochladen. Thema und Aufgabenstellung werden daraus erkannt.</p>
+            </div>
+            <label id="dossierUploadBox" class="upload-box neutral" for="dossierFile">
+              <strong>Ganzes Prüfungsdossier hier ablegen oder auswählen</strong>
+              <span>Die Erkennung vergleicht das Dossier mit dem hochgeladenen Aufsatz und schlägt das gewählte Thema vor.</span>
+            </label>
+            <div id="dossierStatus" class="status">Noch kein Prüfungsdossier geladen.</div>
+            <div id="dossierCandidateSection" class="hidden">
+              <div class="guide-box">
+                <p class="guide-text">
+                  Wähle das erkannte Thema aus und bestätige es. Erst danach startet die Korrektur mit dem passenden Bewertungsrahmen.
+                </p>
+                <div id="dossierCandidateList" class="candidate-list"></div>
+                <div class="inline-actions">
+                  <button id="confirmDossierButton" class="primary small" type="button">Thema bestätigen</button>
+                  <button id="resetDossierButton" class="ghost small" type="button">Themenblock zurücksetzen</button>
+                  <p id="dossierConfirmStatus" class="hint">Noch kein Thema bestätigt.</p>
+                </div>
+              </div>
+            </div>
+            <div class="inline-actions">
+              <p class="hint">Die Aufgabenstellung kann manuell ergänzt oder aus dem Prüfungsdossier übernommen werden.</p>
+            </div>
+            <div id="assignmentWrap" class="hidden">
+              <textarea
+                id="assignmentInput"
+                rows="6"
+                placeholder="Aufgabenstellung hier eingeben, z. B. Erörtern Sie die Vor- und Nachteile und nehmen Sie am Schluss begründet Stellung."
+              ></textarea>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Gym-/FMS-Stufe für Kriterium 4</span>
+            <select id="gymLevel">
+              <option value="1">Stufe 1</option>
+              <option value="2">Stufe 2</option>
+              <option value="3">Stufe 3</option>
+              <option value="4">Stufe 4</option>
+              <option value="1_m_KP">Stufe 1 mit Korrekturprogramm</option>
+              <option value="2_m_KP">Stufe 2 mit Korrekturprogramm</option>
+              <option value="3_m_KP">Stufe 3 mit Korrekturprogramm</option>
+              <option value="4_m_KP">Stufe 4 mit Korrekturprogramm</option>
+            </select>
+          </label>
+
+          <div class="field">
+            <span>Datenschutzmodus</span>
+            <div class="guide-box">
+              <p class="guide-text">LM Studio und LanguageTool sind fest auf lokale Endpunkte auf <code>localhost</code> beschränkt.</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <span>Schulmodus</span>
+            <label class="toggle-card" for="schoolMode">
+              <span>
+                <strong>Nur stabile Standardeinstellungen verwenden</strong>
+                <small id="schoolModeHint">Fixes Standardmodell, kompaktere Analysegrenzen und ruhigere lokale Läufe für längere Texte.</small>
+              </span>
+              <input id="schoolMode" type="checkbox" checked />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Modell (optional)</span>
+            <input id="model" type="text" placeholder="leer lassen für erstes geladenes Modell" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="healthButton" class="ghost" type="button">Lokale Dienste prüfen</button>
+          <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
+          <button id="resetButton" class="ghost" type="button">Eingaben zurücksetzen</button>
+        </div>
+
+        <div id="statusBox" class="status" aria-live="polite">Bereit.</div>
+        <div id="warningBox" class="status warning hidden"></div>
+        <div id="healthBox" class="health"></div>
+      </section>
+
+      <section id="resultPanel" class="panel hidden">
+        <div class="panel-head">
+          <h2>2. Ergebnis</h2>
+          <p>Die Kriterien 1 bis 3 werden lernförderlich kommentiert; Kriterium 4 zählt nur Grammatik und Rechtschreibung.</p>
+        </div>
+
+        <div id="metadataBox" class="summary"></div>
+        <div id="teacherViewBox" class="summary"></div>
+        <div id="summaryBox" class="summary"></div>
+        <div id="sectionReportsBox" class="summary hidden"></div>
+        <div id="criteriaGrid" class="criteria-grid"></div>
+        <div id="orthographyBox" class="orthography"></div>
+
+        <div class="actions">
+          <button id="downloadButton" class="primary" type="button">Korrigiertes DOCX herunterladen</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

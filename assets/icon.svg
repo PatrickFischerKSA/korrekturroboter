@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d7a67"/>
+      <stop offset="100%" stop-color="#17314a"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fffdf7"/>
+      <stop offset="100%" stop-color="#efe6d8"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="216" fill="url(#bg)"/>
+  <circle cx="792" cy="264" r="120" fill="#f1d77a" opacity="0.18"/>
+  <rect x="232" y="180" width="560" height="664" rx="42" fill="url(#paper)"/>
+  <path d="M704 180h88v128h-88c-31 0-56-25-56-56v-72z" fill="#d8c9b2"/>
+  <rect x="308" y="330" width="264" height="42" rx="21" fill="#17314a"/>
+  <rect x="308" y="410" width="408" height="24" rx="12" fill="#7f8b96"/>
+  <rect x="308" y="468" width="408" height="24" rx="12" fill="#7f8b96"/>
+  <rect x="308" y="526" width="352" height="24" rx="12" fill="#7f8b96"/>
+  <rect x="308" y="614" width="236" height="118" rx="28" fill="#b42318"/>
+  <text x="426" y="694" text-anchor="middle" font-size="100" font-family="Georgia, 'Times New Roman', serif" font-weight="700" fill="#fffdf7">KR</text>
+  <rect x="588" y="614" width="128" height="22" rx="11" fill="#0d7a67"/>
+  <rect x="588" y="658" width="128" height="22" rx="11" fill="#0d7a67"/>
+  <rect x="588" y="702" width="96" height="22" rx="11" fill="#0d7a67"/>
+</svg>
