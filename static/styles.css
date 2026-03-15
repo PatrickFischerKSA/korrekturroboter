@@ -89,6 +89,85 @@ h1 {
   margin-bottom: 20px;
 }
 
+.service-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.service-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: #fffdfa;
+}
+
+.service-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.service-card h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.service-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.service-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-family: "Courier New", monospace;
+  font-size: 0.8rem;
+}
+
+.service-card-ok {
+  border-color: rgba(13, 122, 103, 0.26);
+  background: rgba(13, 122, 103, 0.06);
+}
+
+.service-card-error {
+  border-color: rgba(180, 35, 24, 0.26);
+  background: rgba(180, 35, 24, 0.05);
+}
+
+.service-card-neutral {
+  border-color: var(--line);
+  background: #fffdfa;
+}
+
+.service-badge-ok {
+  background: rgba(13, 122, 103, 0.16);
+  color: var(--accent-strong);
+}
+
+.service-badge-error {
+  background: rgba(180, 35, 24, 0.12);
+  color: var(--alert);
+}
+
+.service-badge-neutral {
+  background: var(--warm);
+  color: var(--muted);
+}
+
+.service-guide {
+  margin-bottom: 18px;
+}
+
 .panel-head h2 {
   font-size: clamp(1.8rem, 3vw, 2.6rem);
 }
@@ -503,6 +582,70 @@ button:disabled {
   line-height: 1.6;
 }
 
+.orthography-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(200, 191, 174, 0.8);
+}
+
+.orthography-list h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.orthography-items {
+  display: grid;
+  gap: 12px;
+}
+
+.orthography-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(200, 191, 174, 0.8);
+  border-radius: 16px;
+  background: rgba(232, 223, 207, 0.18);
+}
+
+.orthography-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.orthography-item p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.teacher-view-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.teacher-metric {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(200, 191, 174, 0.8);
+  border-radius: 16px;
+  background: rgba(232, 223, 207, 0.18);
+}
+
+.teacher-metric strong {
+  color: var(--ink);
+}
+
+.teacher-metric p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .section-report-list {
   display: grid;
   gap: 14px;
@@ -561,7 +704,9 @@ button:disabled {
   .criteria-grid,
   .start-grid,
   .section-signal-grid,
-  .candidate-list {
+  .candidate-list,
+  .teacher-view-grid,
+  .service-status-grid {
     grid-template-columns: 1fr;
   }
 

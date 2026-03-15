@@ -32,8 +32,15 @@ const elements = {
   statusBox: document.getElementById("statusBox"),
   warningBox: document.getElementById("warningBox"),
   healthBox: document.getElementById("healthBox"),
+  lmStudioStatusCard: document.getElementById("lmStudioStatusCard"),
+  lmStudioBadge: document.getElementById("lmStudioBadge"),
+  lmStudioStatusText: document.getElementById("lmStudioStatusText"),
+  languageToolStatusCard: document.getElementById("languageToolStatusCard"),
+  languageToolBadge: document.getElementById("languageToolBadge"),
+  languageToolStatusText: document.getElementById("languageToolStatusText"),
   resultPanel: document.getElementById("resultPanel"),
   metadataBox: document.getElementById("metadataBox"),
+  teacherViewBox: document.getElementById("teacherViewBox"),
   summaryBox: document.getElementById("summaryBox"),
   sectionReportsBox: document.getElementById("sectionReportsBox"),
   criteriaGrid: document.getElementById("criteriaGrid"),
@@ -140,26 +147,79 @@ syncSchoolModeState();
 updateReviewButtonState();
 clearWarnings();
 restorePendingFile();
+checkHealth();
 
 async function checkHealth() {
-  setHealth("LM Studio wird geprüft ...", "");
+  setHealth("Lokale Dienste werden geprüft ...", "");
   try {
     const response = await fetch("/api/health");
     const payload = await response.json();
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
-    }
+    renderServiceStatus(payload);
 
     const lines = [
       payload.privacy_notice,
       `Verbindung erfolgreich: ${payload.base_url}`,
-      `Geladene Modelle: ${payload.models.join(", ")}`,
-      `Standardmodell: ${payload.selected_model}`,
+      `Geladene Modelle: ${(payload.models || []).join(", ")}`,
+      `Standardmodell: ${payload.selected_model || "nicht verfügbar"}`,
     ];
+    if (payload.languagetool?.ok) {
+      lines.push(`LanguageTool lokal: ${payload.languagetool.base_url}`);
+      lines.push(`LanguageTool-Sprachen: ${(payload.languagetool.languages || []).slice(0, 8).join(", ")}`);
+    } else if (payload.languagetool?.base_url) {
+      lines.push(`LanguageTool lokal nicht bereit: ${payload.languagetool.base_url}`);
+      if (payload.languagetool.error) {
+        lines.push(`LanguageTool-Hinweis: ${payload.languagetool.error}`);
+      }
+    }
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "LM Studio ist nicht erreichbar.");
+    }
     setHealth(lines.join("\n"), "ok");
   } catch (error) {
+    renderServiceStatus({
+      ok: false,
+      error: error.message,
+      languagetool: {
+        ok: false,
+        error: "Nicht geprüft oder nicht erreichbar.",
+      },
+    });
     setHealth(buildLmStudioHelp(error.message), "error");
   }
+}
+
+function renderServiceStatus(payload) {
+  const lmOk = Boolean(payload?.ok);
+  const ltOk = Boolean(payload?.languagetool?.ok);
+
+  updateServiceCard(
+    elements.lmStudioStatusCard,
+    elements.lmStudioBadge,
+    elements.lmStudioStatusText,
+    lmOk ? "Bereit" : "Fehlt",
+    lmOk
+      ? `Verbunden mit ${payload.base_url}. Standardmodell: ${payload.selected_model || "nicht angegeben"}.`
+      : payload?.error || "LM Studio ist aktuell nicht erreichbar oder liefert keine Modelle.",
+    lmOk ? "ok" : "error"
+  );
+
+  updateServiceCard(
+    elements.languageToolStatusCard,
+    elements.languageToolBadge,
+    elements.languageToolStatusText,
+    ltOk ? "Bereit" : "Fehlt",
+    ltOk
+      ? `Verbunden mit ${payload.languagetool.base_url}. Verfügbare Sprachcodes: ${(payload.languagetool.languages || []).slice(0, 6).join(", ")}.`
+      : payload?.languagetool?.error || "LanguageTool lokal ist aktuell nicht erreichbar. Zielpfad: http://127.0.0.1:8081/v2",
+    ltOk ? "ok" : "error"
+  );
+}
+
+function updateServiceCard(card, badge, textNode, badgeText, message, variant) {
+  card.className = `service-card ${variant === "ok" ? "service-card-ok" : variant === "error" ? "service-card-error" : "service-card-neutral"}`;
+  badge.className = `service-badge ${variant === "ok" ? "service-badge-ok" : variant === "error" ? "service-badge-error" : "service-badge-neutral"}`;
+  badge.textContent = badgeText;
+  textNode.textContent = message;
 }
 
 async function generateReview() {
@@ -244,6 +304,7 @@ function renderResult(review) {
     <h3>Bewertungsrahmen</h3>
     <p>${metadata.join("<br />")}</p>
   `;
+  renderTeacherView(review.teacher_view || {});
   elements.summaryBox.innerHTML = `
     <h3>Kurzzusammenfassung</h3>
     <p>${formatText(review.summary || "Keine Zusammenfassung vorhanden.")}</p>
@@ -269,10 +330,79 @@ function renderResult(review) {
     .join("");
 
   const orthography = review.orthography;
+  const languageErrors = Array.isArray(review.language_errors) ? review.language_errors : [];
+  const errorListMarkup = languageErrors.length
+    ? `
+      <div class="orthography-list">
+        <h4>Gezählte Fehler im Detail</h4>
+        <p>Die Liste zeigt alle aktuell gezählten Grammatik- und Rechtschreibfehler, damit die Teilnote überprüfbar bleibt.</p>
+        <div class="orthography-items">
+          ${languageErrors
+            .map((item) => {
+              const label = item.category === "grammatik" ? "Grammatik" : "Rechtschreibung";
+              return `
+                <article class="orthography-item">
+                  <div class="orthography-item-head">
+                    <span class="candidate-meta">${escapeHtml(label)}</span>
+                    <span class="candidate-meta">Absatz ${escapeHtml(String(Number(item.paragraph_index || 0) + 1))}</span>
+                  </div>
+                  <p><strong>Textstelle:</strong> ${formatText(item.snippet || "")}</p>
+                  <p><strong>Hinweis:</strong> ${formatText(item.comment || "")}</p>
+                  <p><strong>Vorschlag:</strong> ${formatText(item.suggestion || "Überprüfen")}</p>
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `
+    : `
+      <div class="orthography-list">
+        <h4>Gezählte Fehler im Detail</h4>
+        <p>Aktuell wurden keine einzelnen Sprachfehler gespeichert. Das sollte nur bei wirklich fehlerfreien oder unvollständig analysierten Texten vorkommen.</p>
+      </div>
+    `;
   elements.orthographyBox.innerHTML = `
     <h3>Kriterium 4 - Sprachliche Korrektheit</h3>
     <div class="score">Teilnote ${Number(orthography.grade).toFixed(2)}</div>
     <p>${formatText(orthography.comment)}</p>
+    ${errorListMarkup}
+  `;
+}
+
+function renderTeacherView(teacherView) {
+  const breakdown = teacherView.error_breakdown || {};
+  const criteria = teacherView.criteria_overview || {};
+  elements.teacherViewBox.innerHTML = `
+    <h3>Lehrpersonenansicht</h3>
+    <p>Diese Übersicht verdichtet die maschinelle Korrektur zu einem rasch kontrollierbaren Bewertungsstand für Lehrpersonen.</p>
+    <div class="teacher-view-grid">
+      <article class="teacher-metric">
+        <strong>Gesamtnote</strong>
+        <span class="score">${Number(teacherView.overall_grade || 0).toFixed(2)}</span>
+      </article>
+      <article class="teacher-metric">
+        <strong>Inhalt</strong>
+        <span class="score">${Number(criteria.inhalt || 0).toFixed(2)}</span>
+      </article>
+      <article class="teacher-metric">
+        <strong>Aufbau</strong>
+        <span class="score">${Number(criteria.aufbau || 0).toFixed(2)}</span>
+      </article>
+      <article class="teacher-metric">
+        <strong>Ausdruck</strong>
+        <span class="score">${Number(criteria.ausdruck || 0).toFixed(2)}</span>
+      </article>
+      <article class="teacher-metric">
+        <strong>Sprachliche Korrektheit</strong>
+        <span class="score">${Number(criteria.sprachliche_korrektheit || 0).toFixed(2)}</span>
+      </article>
+      <article class="teacher-metric">
+        <strong>Fehlerbilanz</strong>
+        <p>${escapeHtml(String(breakdown.total || 0))} insgesamt, ${escapeHtml(String(breakdown.rechtschreibung || 0))} Rechtschreibung, ${escapeHtml(String(breakdown.grammatik || 0))} Grammatik.</p>
+      </article>
+    </div>
+    <p><strong>Sprachquelle:</strong> ${escapeHtml(teacherView.language_source || "nicht angegeben")}</p>
   `;
 }
 

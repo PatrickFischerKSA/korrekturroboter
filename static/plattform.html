@@ -23,6 +23,41 @@
           <p>Die Auswertung bleibt lokal, solange LM Studio lokal auf diesem Gerät oder im internen Netz läuft.</p>
         </div>
 
+        <div id="serviceStatusBox" class="service-status-grid">
+          <article id="lmStudioStatusCard" class="service-card service-card-neutral">
+            <div class="service-card-head">
+              <h3>LM Studio</h3>
+              <span id="lmStudioBadge" class="service-badge service-badge-neutral">Ungeprüft</span>
+            </div>
+            <p id="lmStudioStatusText">Noch nicht geprüft.</p>
+          </article>
+          <article id="languageToolStatusCard" class="service-card service-card-neutral">
+            <div class="service-card-head">
+              <h3>LanguageTool Lokal</h3>
+              <span id="languageToolBadge" class="service-badge service-badge-neutral">Ungeprüft</span>
+            </div>
+            <p id="languageToolStatusText">Noch nicht geprüft.</p>
+          </article>
+        </div>
+
+        <div class="guide-box service-guide">
+          <p class="guide-text">
+            <strong>LanguageTool lokal starten</strong><br />
+            Ziel ist ein lokaler Server auf <code>http://127.0.0.1:8081/v2</code>. Die App prüft dort
+            die Endpunkte <code>/languages</code> und <code>/check</code>. Wenn der Dienst läuft,
+            übernimmt er Kriterium 4 bevorzugt für Grammatik und Rechtschreibung.
+          </p>
+          <p class="hint">
+            Kurzablauf: 1. LanguageTool lokal starten. 2. Dienst auf <code>localhost:8081</code> halten.
+            3. Hier auf <strong>Lokale Dienste prüfen</strong> klicken. 4. Erst danach die Korrektur ausführen.
+          </p>
+          <p class="hint">
+            Wenn LanguageTool nicht läuft, fällt die App auf den lokalen macOS-Rechtschreibdienst und
+            auf eigene Grammatikregeln zurück. Das ist besser als vorher, aber schwächer als ein aktiver
+            lokaler LanguageTool-Server.
+          </p>
+        </div>
+
         <div class="grid">
           <div class="field full-span">
             <span>Word-Dokument</span>
@@ -133,7 +168,7 @@
           <div class="field">
             <span>Datenschutzmodus</span>
             <div class="guide-box">
-              <p class="guide-text">LM Studio ist fest auf den lokalen Endpunkt <code>http://127.0.0.1:1234/v1</code> beschränkt.</p>
+              <p class="guide-text">LM Studio und LanguageTool sind fest auf lokale Endpunkte auf <code>localhost</code> beschränkt.</p>
             </div>
           </div>
 
@@ -155,7 +190,7 @@
         </div>
 
         <div class="actions">
-          <button id="healthButton" class="ghost" type="button">LM Studio prüfen</button>
+          <button id="healthButton" class="ghost" type="button">Lokale Dienste prüfen</button>
           <button id="reviewButton" class="primary" type="button">Korrigiertes DOCX erzeugen</button>
           <button id="resetButton" class="ghost" type="button">Eingaben zurücksetzen</button>
         </div>
@@ -172,6 +207,7 @@
         </div>
 
         <div id="metadataBox" class="summary"></div>
+        <div id="teacherViewBox" class="summary"></div>
         <div id="summaryBox" class="summary"></div>
         <div id="sectionReportsBox" class="summary hidden"></div>
         <div id="criteriaGrid" class="criteria-grid"></div>
